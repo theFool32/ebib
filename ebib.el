@@ -94,7 +94,7 @@ can be found, return nil."
       (setq window nil))
      ;; Find a buffer other than the index buffer that's being displayed.
      (t (setq window (let ((b (cdr (seq-find (lambda (elt) (and (not (eq (car elt) 'index))
-                                                                (get-buffer-window (cdr elt))))
+                                                           (get-buffer-window (cdr elt))))
                                              ebib--buffer-alist))))
                        (if b (get-buffer-window b))))))
     (when window
@@ -3729,7 +3729,7 @@ and editors in all databases."
         (setq unbraced? (ebib-unbraced-p init-contents))
         (setq init-contents (ebib-unbrace init-contents)))
       (ebib--ifstring (new-contents (cond
-                                     ((member-ignore-case cur-field '("journal" "journaltitle" "publisher" "organization"))
+                                     ((member-ignore-case cur-field '("journal" "journaltitle" "publisher" "organization" "booktitle"))
                                       (completing-read (format "%s: " cur-field)
                                                        (ebib--create-collection-from-field cur-field)
                                                        nil nil
