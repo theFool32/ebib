@@ -116,7 +116,9 @@ when it is first saved.  Note that Ebib uses
                                          "abstract"
                                          "keywords"
                                          "file"
-                                         "timestamp")
+                                         "timestamp"
+                                         "read"
+                                         "readtime")
                                (BibTeX "crossref"
                                        "annote"
                                        "abstract"
@@ -124,7 +126,9 @@ when it is first saved.  Note that Ebib uses
                                        "file"
                                        "timestamp"
                                        "url"
-                                       "doi"))
+                                       "doi"
+                                       "read"
+                                       "readtime"))
   "List of the extra fields for BibTeX entries.
 Extra fields are fields that are available for all entry types.
 Depending on the bibliography style, the value of these fields

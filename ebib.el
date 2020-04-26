@@ -94,7 +94,7 @@ can be found, return nil."
       (setq window nil))
      ;; Find a buffer other than the index buffer that's being displayed.
      (t (setq window (let ((b (cdr (seq-find (lambda (elt) (and (not (eq (car elt) 'index))
-                                                           (get-buffer-window (cdr elt))))
+                                                                (get-buffer-window (cdr elt))))
                                              ebib--buffer-alist))))
                        (if b (get-buffer-window b))))))
     (when window
@@ -944,6 +944,8 @@ keywords before Emacs is killed."
     (define-key map "R" 'ebib-reading-list-map)
     (define-key map "s" #'ebib-save-current-database)
     (define-key map "S" #'ebib-edit-strings)
+    (define-key map "t" #'ebib-toggle-read)
+    (define-key map "T" #'ebib-transform-title)
     (define-key map "u" #'ebib-browse-url)
     (define-key map "w" #'ebib-write-database)
     (define-key map "x" #'ebib-export-entries) ; prefix
@@ -952,6 +954,7 @@ keywords before Emacs is killed."
     (define-key map "\C-x\C-s" #'ebib-save-current-database)
     (define-key map "X" #'ebib-export-preamble)
     (define-key map "y" #'ebib-yank-entry)
+    (define-key map "Y" #'ebib-yank-title)
     (define-key map "z" #'ebib-leave-ebib-windows)
     (define-key map "Z" #'ebib-lower)
     (define-key map [mouse-1] #'ebib-index-open-at-point)
@@ -1540,6 +1543,7 @@ is replaced with a number in ascending sequence."
        (let ((new-key (ebib--add-entry-stub entry-alist ebib--cur-db)))
          (ebib-db-set-current-entry-key new-key ebib--cur-db)
          (ebib--insert-entry-in-index-sorted new-key t)
+         (ebib-set-field-value "read" "F" new-key ebib--cur-db)
          (ebib--update-entry-buffer))
        (ebib--edit-entry-internal)))
     (no-database
@@ -2731,8 +2735,8 @@ browser."
   "Send URL to a browser."
   (if ebib-browser-command
       (progn
-        (message "Executing `%s %s'" ebib-browser-command url)
-        (start-process "Ebib--browser" nil ebib-browser-command url))
+        (message "Executing `%s %s'" ebib-browser-command (concat "\"" url "\""))
+        (start-process "Ebib--browser" nil ebib-browser-command (concat "\"" url "\"")))
     (message "Opening `%s'" url)
     (browse-url url)))
 
@@ -2747,6 +2751,61 @@ argument ARG can be used to specify which file to choose."
      (let ((file (ebib-get-field-value ebib-file-field (ebib--get-key-at-point) ebib--cur-db 'noerror 'unbraced 'xref))
            (num (if (numberp arg) arg nil)))
        (ebib--call-file-viewer (ebib--select-file file num (ebib--get-key-at-point)))))
+    (default
+      (beep))))
+
+(defun ebib-toggle-read ()
+  "Toggle read status."
+  (interactive)
+  (ebib--execute-when
+    (entries
+     (let ((current-key (ebib--get-key-at-point))
+           (read-status (ebib-get-field-value "read" (ebib--get-key-at-point) ebib--cur-db 'noerror 'unbraced 'xref)))
+       (if (string= read-status "T")
+           (progn (ebib-set-field-value "read" "F" current-key ebib--cur-db 'overwrite)
+                  (ebib-set-field-value "readtime" "" current-key ebib--cur-db 'overwrite))
+         (progn (ebib-set-field-value "read" "T" current-key ebib--cur-db 'overwrite)
+                (ebib-set-field-value "readtime" (format-time-string ebib-timestamp-format) current-key ebib--cur-db 'overwrite)))
+       (ebib--update-buffers)
+       (ebib--goto-entry-in-index current-key)
+       (ebib-db-set-modified t ebib--cur-db)))
+    (default
+      (beep))))
+
+(defun ebib-transform-title ()
+  "Transform the title."
+  (interactive)
+  (defun title-case (input) ""
+         (let* (
+                (words (split-string input))
+                (first (pop words))
+                (last (car(last words)))
+                (do-not-capitalize '("the" "of" "from" "and" "yet"))) ; etc
+           (concat (capitalize first)
+                   " "
+                   (mapconcat (lambda (w)
+                                (if (not(member (downcase w) do-not-capitalize))
+                                    (capitalize w)(downcase w)))
+                              (butlast words) " ")
+                   " " (capitalize last))))
+  (ebib--execute-when
+    (entries
+     (let ((current-key (ebib--get-key-at-point))
+           (current-title (ebib-get-field-value "title" (ebib--get-key-at-point) ebib--cur-db 'noerror 'unbraced 'xref)))
+       (ebib-set-field-value "title" (title-case current-title) current-key ebib--cur-db 'overwrite)
+       (ebib--update-buffers)
+       (ebib--goto-entry-in-index current-key)
+       (ebib-db-set-modified t ebib--cur-db)))
+    (default
+      (beep))))
+
+(defun ebib-yank-title ()
+  "Yank the title."
+  (interactive)
+  (ebib--execute-when
+    (entries
+     (let ((current-title (ebib-get-field-value "title" (ebib--get-key-at-point) ebib--cur-db 'noerror 'unbraced 'xref)))
+       (kill-new current-title)))
     (default
       (beep))))
 
