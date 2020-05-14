@@ -94,7 +94,7 @@ can be found, return nil."
       (setq window nil))
      ;; Find a buffer other than the index buffer that's being displayed.
      (t (setq window (let ((b (cdr (seq-find (lambda (elt) (and (not (eq (car elt) 'index))
-                                                                (get-buffer-window (cdr elt))))
+                                                           (get-buffer-window (cdr elt))))
                                              ebib--buffer-alist))))
                        (if b (get-buffer-window b))))))
     (when window
@@ -913,6 +913,7 @@ keywords before Emacs is killed."
     (define-key map "c" #'ebib-index-c)
     (define-key map "C" #'ebib-follow-crossref)
     (define-key map "d" #'ebib-delete-entry) ; prefix
+    (define-key map "D" #'ebib-delete-entry-with-file)
     (define-key map "e" #'ebib-edit-entry)
     (define-key map "E" #'ebib-edit-keyname)
     (define-key map "f" #'ebib-view-file)
@@ -1993,6 +1994,24 @@ their contents into a single field."
   "Toggle whether multiline fields are printed."
   (interactive)
   (setq ebib-print-multiline (not ebib-print-multiline)))
+
+(defun ebib-delete-entry-with-file ()
+  "Delete the current entry from the database along with the files."
+  (interactive)
+  (ebib--execute-when
+    (entries
+     (let ((current-key (ebib--get-key-at-point))
+           (files (ebib-get-field-value ebib-file-field (ebib--get-key-at-point) ebib--cur-db 'noerror 'unbraced 'xref)))
+       (if files
+           (let ((file-list (ebib--split-files files)))
+             (mapc (lambda (f) (delete-file (ebib--expand-file-name f) nil)) file-list)
+             ))
+       (ebib-db-remove-entry current-key ebib--cur-db)
+       (ebib-db-set-modified t ebib--cur-db)
+       (ebib--update-buffers)
+       ))
+    (default
+      (beep))))
 
 (defun ebib-delete-entry ()
   "Delete the current entry from the database.
