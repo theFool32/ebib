@@ -2007,12 +2007,14 @@ their contents into a single field."
            (let ((file-list (ebib--split-files files)))
              (mapc (lambda (f) (delete-file (ebib--expand-file-name f) nil)) file-list)
              ))
-       (ebib-db-remove-entry current-key ebib--cur-db)
-       (ebib-db-set-modified t ebib--cur-db)
-       (ebib--update-buffers)
+       ;; (ebib-db-remove-entry current-key ebib--cur-db)
+       ;; (ebib-db-set-modified t ebib--cur-db)
+       ;; (ebib--update-buffers)
        ))
     (default
-      (beep))))
+      (beep)))
+  (ebib-kill-entry)
+  )
 
 (defun ebib-delete-entry ()
   "Delete the current entry from the database.
