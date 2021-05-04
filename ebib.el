@@ -3413,7 +3413,7 @@ the current entry."
                                                       (ebib--keywords-sort new-conts)
                                                     new-conts)
                                                   entry-key ebib--cur-db 'overwrite)
-                            (mapc #'ebib--maybe-add-keywords-to-canonical-list keywords))))
+                            (ebib--maybe-add-keywords-to-canonical-list keywords))))
     (let* ((minibuffer-local-completion-map (make-composed-keymap '(keymap (32)) minibuffer-local-completion-map))
            (keywords (ebib--completing-read-keywords ebib--keywords-completion-list)))
       (when keywords
@@ -4001,7 +4001,7 @@ If FILE is not in (a subdirectory of) one of the directories in
                                                                (split-string (ebib-unbrace (or (cdr (assoc-string "author" entry 'case-fold))
                                                                                                (cdr (assoc-string "editor" entry 'case-fold))
                                                                                                ""))
-                                                                             (regexp-quote " and ") t))
+                                                                             "[[:space:]]+\\(and\\|AND\\)[[:space:]]+" t))
                                                              (apply #'seq-concatenate 'list (mapcar (lambda (db)
                                                                                                       (hash-table-values (ebib-db-val 'entries db)))
                                                                                                     (seq-filter (lambda (db)
