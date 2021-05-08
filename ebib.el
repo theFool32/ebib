@@ -2113,7 +2113,7 @@ their contents into a single field."
   (ebib--execute-when
    (entries
     (let ((current-key (ebib--get-key-at-point))
-          (files (ebib-get-field-value ebib-file-field (ebib--get-key-at-point) ebib--cur-db 'noerror 'unbraced 'xref)))
+          (files (ebib-get-field-value "file" (ebib--get-key-at-point) ebib--cur-db 'noerror 'unbraced 'xref)))
       (if files
           (let ((file-list (ebib--split-files files)))
             (mapc (lambda (f) (delete-file (ebib--expand-file-name f) nil)) file-list)
