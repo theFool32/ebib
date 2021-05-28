@@ -1964,9 +1964,8 @@ Honour `ebib-create-backups' and BACKUP-DIRECTORY-ALIST."
                  (if (and sortstring-x sortstring-y)
                      (string< sortstring-x sortstring-y)
                    (string< x y)))))    ; compare entry keys
-    ;; Only entries in visible the index buffer are saved, in case we're writing
-    ;; a filtered db to a new file.
-    (let ((sorted-list (sort (ebib--list-keys ebib--cur-db) #'string<)))
+    ;; `ebib-list-keys` for visible entries while `ebib-db-list-keys` for all.
+    (let ((sorted-list (sort (ebib-db-list-keys ebib--cur-db) #'string<)))
       (cond
        (ebib-save-xrefs-first
         (setq sorted-list (sort sorted-list #'compare-xrefs)))

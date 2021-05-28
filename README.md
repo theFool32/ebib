@@ -13,3 +13,8 @@ for usage and installation instructions.
 The latest release version of Ebib, contact information and mailing list
 can be found at <http://joostkremers.github.io/ebib>. Development sources can be
 found at <https://github.com/joostkremers/ebib>.
+
+
+---
+
+Note that I use the `master` branch for self usage while `devel` branch for fetching upstream.
