@@ -5061,6 +5061,35 @@ created containing only these entries."
       (push (match-string 1) entries))
     entries))
 
+
+(defun ebib-filter-duplicate ()
+  "Filter duplicate items by title."
+  (interactive)
+  (let ((keys (ebib-db-list-keys ebib--cur-db))
+        (table (make-hash-table :test 'equal))
+        (dups))
+    (mapc #'(lambda(key)
+              (let* ((title (format "%s" (ebib-get-field-value "title" key ebib--cur-db 'noerror 'unbraced 'xref)))
+                     (value (gethash title table)))
+
+                (if value
+                    (push title dups)
+                  (puthash title key table))))
+          keys)
+    (let ((titles (cl-remove-duplicates dups)))
+      (mapc #'(lambda(title)
+                (message title)
+                (ebib--execute-when
+                  (filtered-db
+                   (ebib-db-set-filter `(or ,(ebib-db-get-filter ebib--cur-db)
+                                            ,(when t
+                                               `(contains "title" ,title)))
+                                       ebib--cur-db))
+                  (real-db
+                   (ebib-db-set-filter `(contains "title" ,title) ebib--cur-db))))
+            titles))
+    (ebib-index-sort-ascending "Title")))
+
 (provide 'ebib)
 
 ;;; ebib.el ends here
