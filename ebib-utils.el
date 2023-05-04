@@ -1763,12 +1763,12 @@ string has the text property `ebib--alias' with value t."
     value))
 
 ;; Functions for writing out Bib(La)TeX entries.
-(defun ebib--format-entry (key db &optional timestamp sort)
+(defun ebib--format-entry (key db &optional timestamp sort specific-fields)
   "Write entry KEY in DB into the current buffer in BibTeX format.
 If TIMESTAMP is non-nil and `ebib-use-timestamp' is set, a
 timestamp is added to the entry, possibly overwriting an existing
 timestamp.  If SORT is non-nil, the fields are sorted before
-formatting the entry."
+formatting the entry.  If SPECIFIC-FIELDS is non-nil, only such fields are used."
   (let* ((entry (copy-alist (ebib-db-get-entry key db 'noerror)))
          (type (cdr (assoc "=type=" entry))))
     (when entry
@@ -1776,7 +1776,8 @@ formatting the entry."
           (setcdr (assoc-string "timestamp" entry 'case-fold) (format-time-string (concat "{" ebib-timestamp-format "}"))))
       (setq entry (seq-filter (lambda (field)
                                 (and (cdr field) ; Remove fields with value nil. See `ebib-set-field-value'.
-                                     (not (ebib--special-field-p (car field)))))
+                                     (not (ebib--special-field-p (car field)))
+                                     (or (not specific-fields) (member (car field) specific-fields))))
                               entry))
       (setq entry (if sort
                       (cl-sort entry #'string< :key #'car)
