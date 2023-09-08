@@ -50,6 +50,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'subr)
 (require 'easymenu)
 (require 'bibtex)
 (require 'seq)
@@ -860,7 +861,7 @@ ask for confirmation."
   ;; any of them haven't been saved yet.
   (mapc #'kill-buffer ebib--multiline-buffer-list)
   (when (if (ebib--modified-p)
-            (yes-or-no-p "There are modified databases. Quit anyway? ")
+            (y-or-n-p "There are modified databases. Quit anyway? ")
           (or force-quit (y-or-n-p "Quit Ebib? ")))
     (if (and ebib-keywords
              (get 'ebib--keywords-completion-list :modified)
@@ -904,7 +905,7 @@ keywords before Emacs is killed."
                 (progn
                   (ebib-save-all-databases)
                   t)
-              (yes-or-no-p "[Ebib] There are modified databases. Kill anyway? ")))
+              (y-or-n-p "[Ebib] There are modified databases. Kill anyway? ")))
     (when (and ebib-keywords
                (get 'ebib--keywords-completion-list :modified)
                (y-or-n-p "[Ebib] Save modified keywords list? "))
@@ -916,7 +917,7 @@ keywords before Emacs is killed."
   (if (and (with-no-warnings ; `ebib-multiline-mode' is not defined yet.
              ebib-multiline-mode)
            (buffer-modified-p))
-      (yes-or-no-p (format "[Ebib] Multiline edit buffer `%s' not saved. Quit anyway? " (buffer-name)))
+      (y-or-n-p (format "[Ebib] Multiline edit buffer `%s' not saved. Quit anyway? " (buffer-name)))
     t))
 
 ;;; index-mode
@@ -1227,7 +1228,7 @@ interactively."
   (ebib--execute-when
     (entries
      (when (or (and (ebib-db-modified-p ebib--cur-db)
-                    (yes-or-no-p "Database modified. Really reload from file? "))
+                    (y-or-n-p "Database modified. Really reload from file? "))
                (y-or-n-p "Reload current database from file? "))
        (ebib-db-set-current-entry-key (ebib--get-key-at-point) ebib--cur-db)
        (ebib--reload-database ebib--cur-db)
@@ -1244,7 +1245,7 @@ interactively."
     (ebib-db-set-current-entry-key (ebib--get-key-at-point) ebib--cur-db)
     (dolist (db ebib--databases)
       (when (or (not (ebib-db-modified-p db))
-                (yes-or-no-p (format "Database `%s' modified. Really reload from file? " (ebib-db-get-filename db))))
+                (y-or-n-p (format "Database `%s' modified. Really reload from file? " (ebib-db-get-filename db))))
         (ebib--reload-database db)
         (ebib--set-modified nil db)))
     (ebib--update-buffers)))
@@ -1723,7 +1724,7 @@ Keys are in the form: <new-entry1>, <new-entry2>, ..."
     (database
      (catch 'return
        (unless (if (ebib-db-modified-p ebib--cur-db)
-                   (yes-or-no-p "Database modified. Close it anyway? ")
+                   (y-or-n-p "Database modified. Close it anyway? ")
                  (y-or-n-p "Close database? "))
          (throw 'return nil))
 
@@ -1991,7 +1992,7 @@ The FORCE argument is used as in `ebib-save-current-database'."
                (time-less-p db-modtime file-modtime))
       (unless (or (and (listp force)
                        (eq 16 (car force)))
-                  (yes-or-no-p (format "File `%s' changed on disk. Overwrite? " (ebib-db-get-filename db))))
+                  (y-or-n-p (format "File `%s' changed on disk. Overwrite? " (ebib-db-get-filename db))))
         (error "[Ebib] File not saved"))))
 
   ;; Now save the database.
