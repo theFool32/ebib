@@ -50,7 +50,6 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'subr)
 (require 'easymenu)
 (require 'bibtex)
 (require 'seq)
