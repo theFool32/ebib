@@ -2337,17 +2337,17 @@ is prepended to the completion candidates."
   (seq-reduce (lambda (coll db)
                 (let ((file (propertize (ebib-db-get-filename db 'short) 'face 'ebib-display-bibfile-face)))
                   (append (mapcar (lambda (key)
-                                    (let ((candidate (format "%s (%s) «%s»"
-                                                             (ebib--get-field-value-for-display "Author/Editor" key db 'face 'ebib-display-author-face)
+                                    (let ((candidate (format "«%s» (%s) %s"
+                                                             (ebib--get-field-value-for-display "Title" key db 'face 'ebib-display-year-face)
                                                              (ebib--get-field-value-for-display "Year" key db 'face 'ebib-display-year-face)
-                                                             (ebib--get-field-value-for-display "Title" key db))))
+                                                             (ebib--get-field-value-for-display "Author/Editor" key db))))
                                       (setq candidate
                                             (cond
                                              (prepend-db
                                               (concat (format "%-20s  " file) "  " candidate))
                                              ((and (boundp 'selectrum-mode) selectrum-mode)
                                               (propertize candidate 'selectrum-candidate-display-right-margin file))
-                                             (t (concat key "  " candidate))))
+                                             (t (concat candidate " → " key))))
                                       (cons candidate (list key db))))
                                   (ebib-db-list-keys db))
                           coll)))
