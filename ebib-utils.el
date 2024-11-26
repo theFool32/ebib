@@ -2271,7 +2271,7 @@ formatting the entry.  If SPECIFIC-FIELDS is non-nil, only such fields are used.
       (setq entry (seq-filter (lambda (field)
                                 (and (cdr field) ; Remove fields with value nil. See `ebib-set-field-value'.
                                      (not (ebib--special-field-p (car field)))
-                                     (or (not specific-fields) (member (car field) (if (listp specific-fields) specific-fields (list specific-fields)))))
+                                     (or (not specific-fields) (member (car field) (if (listp specific-fields) specific-fields (list specific-fields))))))
                               entry))
       (setq entry (if sort
                       (cl-sort entry #'string< :key #'car)
