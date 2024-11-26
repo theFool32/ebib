@@ -117,12 +117,12 @@ li {
   width: 150px;
 }
 
-.button_github {
+#button-github {
   /* border-radius: 10px; */
   border: solid #495464 1px;
   color: #495464;
   font-family: 'Courier New', monospace;
-  padding: 20px;
+  padding: 10px 20px;
   text-decoration: none;
   display: inline-block;
   cursor: pointer;
@@ -132,8 +132,15 @@ li {
   left: 20px;
 }
 
-.button_github:hover {
+#button-github:hover {
   border-color: #cf1212;
+}
+
+#buy-me-a-coffee {
+  /* display: inline-block; */
+  position: absolute;
+  top: 80px;
+  left: 20px;
 }
 
 @media screen and (max-width: 1400px) {
@@ -156,7 +163,7 @@ li {
     font-size: 1.3em;
   }
 
-  .button_github {
+  #button-github {
     width: 20em;
     font-size: 50%;
     padding: 0;
@@ -166,5 +173,17 @@ li {
     right: auto;
     left: -40px;
     transform: rotate(-45deg);
+  }
+
+  #buy-me-a-coffee {
+    position: relative;
+  }
+
+  #buy-me-a-coffee > img {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    padding-bottom: 20px;
+    width: 150px;
   }
 }

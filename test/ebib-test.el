@@ -8,6 +8,8 @@
 (require 'ebib)
 (require 'with-simulated-input)
 
+;;; Tests for creating citations in source documents (LaTeX, Markdown)
+
 ;; Test `ebib--split-citation-string'
 (ert-deftest ebib--split-citation-without-repeater ()
   (should (equal (ebib--split-citation-string "\\textcite%<[%A]%>%<[%A]%>{%K}")
@@ -95,6 +97,25 @@
                    (ebib--process-citation-template "%A %K %A" "Abney1987"))
                  "cf. Abney1987 p. 20")))
 
+;;; Tests for filters
+(ert-deftest ebib--filters-pp-filter-test ()
+  (should (equal (let ((ebib-filters-display-as-lisp nil))
+                   (ebib--filters-pp-filter '(or (contains "author" "chomsky") (contains "editor" "chomsky"))))
+                 "(author contains \"chomsky\") or (editor contains \"chomsky\")"))
+  (should (equal (let ((ebib-filters-display-as-lisp t))
+                   (ebib--filters-pp-filter '(or (contains "author" "chomsky") (contains "editor" "chomsky"))))
+                 "(or (contains \"author\" \"chomsky\") (contains \"editor\" \"chomsky\"))"))
+  (should (equal (let ((ebib-filters-display-as-lisp nil))
+                   (ebib--filters-pp-filter '(or (contains "any" "chomsky") (contains "editor" "noam"))))
+                 "(any field contains \"chomsky\") or (editor contains \"noam\")"))
+  (should (equal (let ((ebib-filters-display-as-lisp nil))
+                   (ebib--filters-pp-filter '(and (contains "any" "chomsky") (not (contains "editor" "noam")))))
+                 "(any field contains \"chomsky\") and not (editor contains \"noam\")")))
+
+;;; Random tests
+(ert-deftest ebib--split-urls-test ()
+  (should (equal (ebib--split-urls "\\url{https://somewhere.org} https://somewhere.else.org")
+                 '("https://somewhere.org" "https://somewhere.else.org"))))
 
 ;; TODO: Add tests for
 ;; `ebib-citation-prompt-with-format-string`

@@ -1,6 +1,7 @@
 ;;; ebib-biblio.el --- Part of Ebib, a BibTeX database manager  -*- lexical-binding: t -*-
 
-;; Copyright (c) 2003-2021 Joost Kremers
+;; Copyright (c) 2003-2022 Joost Kremers
+;; Copyright (c) 2024 Samuel W. Flint
 ;; All rights reserved.
 
 ;; Author: Joost Kremers <joostkremers@fastmail.fm>
@@ -38,33 +39,39 @@
 ;;
 ;; To use this code, `require' it in your init file.  This adds the key "B" to
 ;; the index mode map, which fetches a BibTeX entry by DOI
-;; (`ebib-biblio-import-doi').  You should also add a key to
-;; `biblio-selection-mode-map' and bind it to `ebib-biblio-selection-import':
+;; (`ebib-biblio-import-doi').  You should also add a binding to
+;; `ebib-index-mode-map' for `ebib-biblio-import-doi', and one to
+;; `biblio-selection-mode-map' for `ebib-biblio-selection-import':
 ;;
+;; (define-key ebib-index-mode-map (kbd "B") #'ebib-biblio-import-doi)
 ;; (define-key biblio-selection-mode-map (kbd "e") #'ebib-biblio-selection-import)
 
 ;;; Code:
 
-(require 'biblio)
+(require 'biblio nil 'noerror)
+(require 'bibtex)
+(require 'ebib-db)
 
 (defvar ebib--databases)
 (defvar ebib--cur-db)
-(defvar ebib-index-mode-map)
 (declare-function ebib-read-database "ext:ebib.el" (prompt &optional databases))
 (declare-function ebib-import-entries "ext:ebib.el" (&optional db))
 
+(declare-function biblio-doi-forward-bibtex "ext:biblio-doi.el" (doi forward-to))
+(declare-function biblio-cleanup-doi "ext:biblio-core.el" (doi))
+(declare-function biblio-doi--insert "ext:biblio-doi.el" (bibtex buffer))
+(declare-function biblio-format-bibtex "ext:biblio-core.el" (bibtex &optional autokey))
+(defvar biblio-bibtex-use-autokey)
+(declare-function biblio--selection-forward-bibtex "ext:biblio-core.el" (forward-to &optional quit))
+
+;;;###autoload
 (defun ebib-biblio-import-doi (doi)
   "Fetch a BibTeX entry from a remote server by its DOI using `biblio.el'.
 The entry is stored in the current database."
   (interactive "MDOI: ")
   (biblio-doi-forward-bibtex (biblio-cleanup-doi doi)
                              (lambda (result)
-                               (with-temp-buffer
-                                 (biblio-doi--insert (biblio-format-bibtex result biblio-bibtex-use-autokey)
-                                                     (current-buffer))
-                                 (ebib-import-entries ebib--cur-db)))))
-
-(define-key ebib-index-mode-map "B" #'ebib-biblio-import-doi)
+                               (ebib-biblio-selection-import-callback (biblio-format-bibtex result biblio-bibtex-use-autokey) nil))))
 
 (defun ebib-biblio-selection-import-callback (bibtex _entry)
   "Add a BibTeX entry to the current Ebib database.
@@ -72,7 +79,14 @@ BIBTEX is the textual representation of the entry, ENTRY is its
 metadata."
   (with-temp-buffer
     (insert bibtex)
-    (ebib-import-entries ebib--cur-db)))
+    (let ((key (save-excursion
+                 (goto-char (point-min))
+                 (looking-at bibtex-any-entry-maybe-empty-head)
+                 (bibtex-key-in-head))))
+      (ebib-import-entries ebib--cur-db)
+      (when key
+        (ebib-db-set-current-entry-key key ebib--cur-db))
+      (ebib--update-buffers))))
 
 (defun ebib-biblio-selection-import ()
   "Import the current entry in the `biblio.el' selection buffer into Ebib."

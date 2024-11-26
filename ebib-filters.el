@@ -1,6 +1,6 @@
 ;;; ebib-filters.el --- Part of Ebib, a BibTeX database manager  -*- lexical-binding: nil -*-
 
-;; Copyright (c) 2003-2021 Joost Kremers
+;; Copyright (c) 2003-2024 Joost Kremers
 ;; All rights reserved.
 
 ;; Author: Joost Kremers <joostkremers@fastmail.fm>
@@ -44,7 +44,7 @@
 (require 'ebib-keywords)
 (require 'ebib-db)
 
-(defgroup ebib-filters nil "Filter settings for Ebib" :group 'ebib)
+(defgroup ebib-filters nil "Filter settings for Ebib." :group 'ebib)
 
 (defcustom ebib-filters-display-as-lisp nil
   "If set, display filters as Lisp expressions."
@@ -53,6 +53,16 @@
 
 (defcustom ebib-filters-ignore-case t
   "If set, ignore case in filter names."
+  :group 'ebib-filters
+  :type 'boolean)
+
+(defcustom ebib-filters-include-crossref nil
+  "If set, include field values from cross-referenced entries.
+By default, if an entry inherits field values from a
+cross-referenced entry, those field values are not checked
+against the filter.  If this option is set, those field values
+are checked, so that entries for which the filter matches on a
+cross-referenced field are included in the results as well."
   :group 'ebib-filters
   :type 'boolean)
 
@@ -119,7 +129,8 @@ a logical `not' is applied to the selection."
   (define-key ebib-filters-map "S" 'ebib-filters-save-filters)
   (define-key ebib-filters-map "v" 'ebib-filters-view-filter)
   (define-key ebib-filters-map "V" 'ebib-filters-view-all-filters)
-  (define-key ebib-filters-map "w" 'ebib-filters-write-to-file))
+  (define-key ebib-filters-map "w" 'ebib-filters-write-to-file)
+  (define-key ebib-filters-map "x" 'ebib-filters-toggle-crossref))
 
 (defun ebib-filters-view-filter ()
   "Display the currently active filter in the minibuffer."
@@ -241,35 +252,34 @@ See `ebib--filters-run-filter'.")
      `(cl-macrolet ((contains (field regexp)
                               `(ebib--search-in-entry ,regexp ebib-entry ,(unless (cl-equalp field "any") field))))
         (seq-filter (lambda (key)
-                      (let ((ebib-entry (ebib-db-get-entry key db 'noerror)))
+                      (let ((ebib-entry (if ebib-filters-include-crossref
+                                            (ebib-get-entry key db 'noerror 'xref)
+                                          (ebib-db-get-entry key db 'noerror))))
                         (when ,filter
                           key)))
                     (ebib-db-list-keys db))))))
 
 (defun ebib--filters-pp-filter (filter)
   "Convert FILTER into a string suitable for displaying.
-If `ebib--filters-display-as-lisp' is set, this simply converts
+If `ebib-filters-display-as-lisp' is set, this simply converts
 FILTER into a string representation of the Lisp expression.
 Otherwise, it is converted into infix notation.  If FILTER is nil,
 return value is also nil."
   (when filter
     (if ebib-filters-display-as-lisp
         (format "%S" filter)
-      (cl-labels
-          ((pp-filter (f)
-                      (cond
-                       ((listp f) ; `f' is either a list or a string.
-                        (let ((op (cl-first f)))
-                          (cond
-                           ((eq op 'not)
-                            (format "not %s" (pp-filter (cl-second f))))
-                           ((eq op 'contains)
-                            (format "(%s contains \"%s\")" (pp-filter (cl-second f)) (pp-filter (cl-third f))))
-                           ((member op '(and or))
-                            (format "(%s %s %s)" (pp-filter (cl-second f)) op (pp-filter (cl-third f)))))))
-                       (t (if (string= f "any")
-                              "any field"
-                            f)))))
+      (cl-labels ((pp-filter (f)
+                    (cond
+                     ((listp f)                ; `f' is either a list or a string.
+                      (pcase (cl-first f)
+                        ('not
+                         (format "not %s" (pp-filter (cl-second f))))
+                        ('contains
+                         (format "(%s contains \"%s\")" (pp-filter (cl-second f)) (pp-filter (cl-third f))))
+                        (`,(or 'and 'or)
+                         (format "(%s %s %s)" (pp-filter (cl-second f)) (cl-first f) (pp-filter (cl-third f))))))
+                     ((string= f "any") "any field")
+                     (t f))))
         (let ((pretty-filter (pp-filter filter)))
           (if (not pretty-filter)
               "Filtered"
@@ -305,7 +315,7 @@ there is a name conflict."
         (let ((print-length nil)
               (print-level nil)
               (print-circle nil))
-          (insert ";; -*- mode: emacs-lisp -*-\n\n")
+          (insert ";; -*- mode: lisp-data -*-\n\n")
           (insert (format ";; Ebib filters file\n;; Saved on %s\n\n" (format-time-string "%Y.%m.%d %H:%M")))
           (pp ebib--filters-alist (current-buffer))
           (write-region (point-min) (point-max) file)))

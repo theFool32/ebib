@@ -1,6 +1,6 @@
 ;;; ebib-keywords.el --- Part of Ebib, a BibTeX database manager  -*- lexical-binding: t -*-
 
-;; Copyright (c) 2003-2021 Joost Kremers
+;; Copyright (c) 2003-2024 Joost Kremers
 ;; All rights reserved.
 
 ;; Author: Joost Kremers <joostkremers@fastmail.fm>
@@ -40,7 +40,7 @@
 (require 'ebib-utils)
 (require 'ebib-db)
 
-(defgroup ebib-keywords nil "Keyword settings for Ebib" :group 'ebib)
+(defgroup ebib-keywords nil "Keyword settings for Ebib." :group 'ebib)
 
 (defcustom ebib-keywords-separator ", "
   "String for separating keywords in the `keyword' field.

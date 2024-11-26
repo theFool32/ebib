@@ -69,9 +69,9 @@ file containing the key, or `key+filepath', which adds the full
 path to the `.bib' file.  If the file name or path is added, it
 is separated from the key with an @-sign."
   :group 'ebib
-  :type '(choice (const :tag "Key only" 'key)
-                 (const :tag "Key and file name" 'key+filename)
-                 (const :tag "Key and file path" 'key+filepath)))
+  :type '(choice (const :tag "Key only" key)
+                 (const :tag "Key and file name" key+filename)
+                 (const :tag "Key and file path" key+filepath)))
 
 (org-link-set-parameters "ebib" :follow #'org-ebib-open :store #'org-ebib-store-link)
 
@@ -92,11 +92,11 @@ entry buffer."
     ;; This is an Ebib entry
     (let* ((key (ebib--get-key-at-point))
            (link (concat "ebib:" (pcase org-ebib-link-type
-                                        ('key key)
-                                        ('key+filename (format "%s@%s" key (ebib-db-get-filename ebib--cur-db :shortened)))
-                                        ('key+filepath (format "%s@%s" key (ebib-db-get-filename ebib--cur-db))))))
+                                   ('key key)
+                                   ('key+filename (format "%s@%s" key (ebib-db-get-filename ebib--cur-db :shortened)))
+                                   ('key+filepath (format "%s@%s" key (ebib-db-get-filename ebib--cur-db))))))
            (description (ignore-errors (funcall ebib-citation-description-function key ebib--cur-db))))
-      (org-store-link-props :type "ebib"
+      (org-link-store-props :type "ebib"
                             :link link
                             :description description))))
 
@@ -137,14 +137,14 @@ position in the relevant buffer."
       (goto-char position)
       (goto-char (org-element-property :begin (org-element-context)))
       (cond
-       ((looking-at org-bracket-link-regexp)
+       ((looking-at org-link-bracket-re)
         (mapconcat 'org-ebib-make-help-echo-string
                    (split-string
                     (cadr (split-string (match-string-no-properties 1)
                                         ":" t "[[:punct:]]*"))
                     "," t)
                    "\n"))
-       ((looking-at org-plain-link-re)
+       ((looking-at org-link-plain-re)
         (mapconcat 'org-ebib-make-help-echo-string
                    (split-string
                     (cadr (split-string (match-string-no-properties 0)

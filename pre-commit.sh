@@ -30,6 +30,8 @@ SCRIPT=$(basename "$0")
 E_SUCCESS=0
 E_FAILURE=1
 
+unset GIT_LITERAL_PATHSPECS # See Magit FAQ A.2.10 and https://github.com/magit/magit/discussions/4654
+
 # FUNCTIONS
 
 function confirm_file
@@ -45,7 +47,7 @@ function create_texi
 {
     local source="$1"
     echo "$SCRIPT: running pandoc to create texinfo"
-    pandoc --read=markdown \
+    pandoc --read=markdown+gfm_auto_identifiers \
            --write=texinfo \
            --output="$TEXINFO" \
            --include-before-body="$TEXINFO_BBODY" \

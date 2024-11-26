@@ -1,6 +1,7 @@
 ;;; ebib-notes.el --- Part of Ebib, a BibTeX database manager  -*- lexical-binding: t -*-
 
-;; Copyright (c) 2003-2021 Joost Kremers
+;; Copyright (c) 2003-2024 Joost Kremers
+;; Copyright (c) 2022-2024 Hugo Heagren
 ;; All rights reserved.
 
 ;; Author: Joost Kremers <joostkremers@fastmail.fm>
@@ -40,7 +41,8 @@
 
 (require 'org-element nil t) ; Load org-element.el if available.
 
-(declare-function org-capture "org-capture-get" (prop &optional local))
+(declare-function org-capture-get "org-capture" (prop &optional local))
+(declare-function ebib-extract-note-text-default "ext:ebib" (key truncate))
 
 (defgroup ebib-notes nil "Settings for notes files." :group 'ebib)
 
@@ -123,6 +125,17 @@ instead."
   :type '(choice (const :tag "Use `ebib-name-transform-function'" nil)
                  (function :tag "Apply function")))
 
+(defcustom ebib-notes-extract-text-function #'ebib-extract-note-text-default
+  "Function to extract the text of a note.
+The function should take two arguments: KEY, indicating the entry
+to which the relevant note belongs, and TRUNCATE, which, if
+non-nil, indicates that the resulting text should be truncated to
+`ebib-notes-display-max-lines'.  The function should return a list
+of strings, each a separate line, which can be passed to
+`ebib--display-multiline-field'."
+  :group 'ebib-notes
+  :type 'function)
+
 (defcustom ebib-notes-template "* %T\n:PROPERTIES:\n%K\n:END:\n%%?\n"
   "Template for a note entry in the notes file.
 New notes are created on the basis of this template.  The
@@ -134,6 +147,8 @@ Note that the `%K' specifier must be present in the template and
 should be replaced by an identifier that is unique for the entry.
 This identifier is used to retrieve the note.  Without it, Ebib
 is not able to determine whether an entry has a note or not.
+Note also that `%K` must occur on a line of its own, i.e., must
+be surrounded by \\n characters in the template.''
 
 The template can also contain the string \"%%?\" to indicate the
 position where the cursor is to be placed when creating a new
@@ -284,11 +299,11 @@ directories in `ebib-notes-locations' that have the extension in
    ;; still need to check `ebib-notes-default-file' (see below).
    (ebib-notes-locations
     (cl-flet ((list-files (loc)
-                          (cond
-                           ((file-directory-p loc)
-                            (directory-files loc 'full (concat (regexp-quote ebib-notes-file-extension) "\\'") 'nosort))
-                           ((string= (downcase (file-name-extension loc)) "org")
-                            (list loc)))))
+                (cond
+                 ((file-directory-p loc)
+                  (directory-files loc 'full (concat (regexp-quote ebib-notes-file-extension) "\\'") 'nosort))
+                 ((string= (downcase (file-name-extension loc)) "org")
+                  (list loc)))))
       (seq-reduce (lambda (lst loc)
                     (append (list-files loc) lst))
                   ebib-notes-locations (if ebib-notes-default-file
@@ -339,7 +354,7 @@ Otherwise just open the note file for KEY.
 Return a cons of the buffer and the position of the note in the
 buffer: in a multi-note file, this is the position of the
 Custom_ID of the note; if each note has its own file, the
-position is simply 1.
+position is set to point.
 
 If KEY has no note, return nil."
   (cond
@@ -361,7 +376,7 @@ If KEY has no note, return nil."
                  ;; Otherwise try and open the file.
                  (and (file-readable-p filename)
                       (ebib--notes-open-single-note-file filename)))))
-      (when buf (cons buf 1))))))
+      (when buf (cons buf (with-current-buffer buf (point))))))))
 
 (defun ebib--notes-create-new-note (key db)
   "Create a note for KEY in DB.
@@ -408,7 +423,15 @@ string of the same width as `ebib-notes-symbol'."
   (if (ebib--notes-has-note key)
       (propertize ebib-notes-symbol
                   'face '(:height 0.8 :inherit ebib-link-face)
-                  'mouse-face 'highlight)
+		  'font-lock-face '(:height 0.8 :inherit ebib-link-face)
+                  'mouse-face 'highlight
+		  'help-echo "mouse-1: popup note"
+		  'button t
+		  'follow-link t
+		  'category t
+		  'button-data key
+		  'keymap button-map
+		  'action 'ebib-popup-note)
     (propertize (make-string (string-width ebib-notes-symbol) ?\s)
                 'face '(:height 0.8))))
 
@@ -433,7 +456,7 @@ name is fully qualified by prepending the directory in
 Return the buffer but do not select it."
   (let ((buf (find-file-noselect file)))
     (with-current-buffer buf
-      (add-hook 'after-save-hook 'ebib--maybe-update-entry-buffer nil t))
+      (add-hook 'after-save-hook 'ebib--update-entry-buffer-keep-note))
     buf))
 
 ;;; Common notes file.
@@ -448,7 +471,7 @@ necessary.  If FILE cannot be opened, an error is raised."
         (error "[Ebib] Cannot read or create notes file"))
       (setq buf (find-file-noselect file))
       (with-current-buffer buf
-        (add-hook 'after-save-hook 'ebib--maybe-update-entry-buffer nil t)))
+        (add-hook 'after-save-hook 'ebib--update-entry-buffer-keep-note nil t)))
     buf))
 
 (provide 'ebib-notes)

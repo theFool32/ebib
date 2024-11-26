@@ -1,6 +1,6 @@
 ;;; ebib-db.el --- Part of Ebib, a BibTeX database manager  -*- lexical-binding: t -*-
 
-;; Copyright (c) 2003-2021 Joost Kremers
+;; Copyright (c) 2003-2024 Joost Kremers
 ;; All rights reserved.
 
 ;; Author: Joost Kremers <joostkremers@fastmail.fm>
@@ -275,11 +275,11 @@ is suffixed, then `ab' etc."
 
 (defun ebib-db-change-key (key new-key db &optional if-exists)
   "Change entry key KEY to NEW-KEY in DB.
-ENTRY must be a key itself.  IF-EXISTS determines what to do when
-NEW-KEY already exists.  If it is nil, an error is triggered.  If
-it is `noerror', no error is triggered and nothing is updated.  If
-it is `overwrite', the existing entry under NEW-KEY is
-overwritten.  If it is `uniquify', a unique key is created.
+IF-EXISTS determines what to do when NEW-KEY already exists.  If
+it is nil, an error is triggered.  If it is `noerror', no error
+is triggered and nothing is updated.  If it is `overwrite', the
+existing entry under NEW-KEY is overwritten.  If it is
+`uniquify', a unique key is created.
 
 If there is no entry with KEY in DB, an error is triggered.
 
@@ -409,7 +409,7 @@ is not stored and the function returns nil.  If it is nil (or any
 other value), an error is raised.
 
 In order to delete the preamble, PREAMBLE should be nil and
-IF-EXISTS should be 'overwrite.
+IF-EXISTS should be `overwrite'.
 
 Return non-nil on success or nil if PREAMBLE could not be stored."
   (let ((existing-preamble (ebib-db-get-preamble db)))

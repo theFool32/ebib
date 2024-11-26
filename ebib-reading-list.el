@@ -1,6 +1,6 @@
 ;;; ebib-reading-list.el --- Part of Ebib, a BibTeX database manager  -*- lexical-binding: t -*-
 
-;; Copyright (c) 2003-2021 Joost Kremers
+;; Copyright (c) 2003-2024 Joost Kremers
 ;; All rights reserved.
 
 ;; Author: Joost Kremers <joostkremers@fastmail.fm>
@@ -65,7 +65,9 @@ sign and a character.  These specifiers are defined by
 must be present in the template and should be replaced by an
 identifier that is unique for the entry.  This identifier is used
 to retrieve the item.  Without it, Ebib is not able to determine
-whether an entry is on the reading list or not."
+whether an entry is on the reading list or not.  Note also that
+`%K' must be on a line of its own in the template (i.e., must be
+surrounded by \\n characters."
   :group 'ebib-reading-list
   :type '(string "Reading list item template"))
 
@@ -196,7 +198,7 @@ value is nil.  Note that this function searches in the current
 buffer."
   (save-excursion
     (goto-char (point-min))
-    (search-forward (funcall (cdr (assoc ?K ebib-reading-list-template-specifiers)) key nil) nil t)))
+    (re-search-forward (concat (funcall (cdr (assoc ?K ebib-reading-list-template-specifiers)) key nil) "$") nil t)))
 
 (defun ebib--reading-list-new-item (key db)
   "Add a reading list item for KEY in DB.

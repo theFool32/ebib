@@ -1,6 +1,7 @@
 ;;; ebib-utils.el --- Part of Ebib, a BibTeX database manager  -*- lexical-binding: t -*-
 
-;; Copyright (c) 2003-2021 Joost Kremers
+;; Copyright (c) 2003-2024 Joost Kremers
+;; Copyright (c) 2022-2024 Hugo Heagren
 ;; All rights reserved.
 
 ;; Author: Joost Kremers <joostkremers@fastmail.fm>
@@ -40,6 +41,8 @@
 (require 'seq)
 (require 'bibtex)
 (require 'format-spec)
+(require 'message) ; for `message-unquote-tokens'.
+(require 'parsebib)
 (require 'ebib-db)
 
 ;; Make a bunch of variables obsolete.
@@ -57,9 +60,9 @@
 
 ;; User customisation.
 
-(defgroup ebib nil "Ebib: a BibTeX database manager" :group 'tex)
+(defgroup ebib nil "Ebib: a BibTeX database manager." :group 'tex)
 
-(defgroup ebib-windows nil "Ebib window management" :group 'ebib)
+(defgroup ebib-windows nil "Ebib window management." :group 'ebib)
 
 (defcustom ebib-default-entry-type "Article"
   "The default entry type.
@@ -67,6 +70,7 @@ This is the entry type assigned to newly created entries."
   :group 'ebib
   :type 'string)
 
+;;;###autoload (put 'ebib-preload-bib-files 'safe-local-variable '(lambda (val) (seq-every-p #'stringp val)))
 (defcustom ebib-preload-bib-files nil
   "List of BibTeX files to load automatically when Ebib starts.
 This option allows you to specify which `.bib' file(s) Ebib
@@ -120,6 +124,7 @@ when it is first saved.  Note that Ebib uses
                  (const :tag "Do not create backups" nil)))
 
 (defcustom ebib-extra-fields '((biblatex "crossref"
+					 "xdata"
                                          "annotation"
                                          "abstract"
                                          "keywords"
@@ -150,42 +155,88 @@ the option \"Hidden Fields\" (`ebib--hidden-fields') for details."
   :type '(set (cons :tag "Dialect" (const biblatex) (repeat :tag "Extra fields" (string :tag "Field")))
               (cons :tag "Dialect" (const BibTeX) (repeat :tag "Extra fields" (string :tag "Field")))))
 
-(defcustom ebib-hidden-fields '("addendum" "afterword" "annotator" "bookauthor"
-                                "booksubtitle" "booktitleaddon" "chapter" "commentator"
-                                "edition" "editora" "editorb" "editorc" "eid" "eprint"
-                                "eprintclass" "eprinttype" "eventdate" "eventtitle"
-                                "foreword" "holder" "howpublished" "introduction" "isbn"
-                                "isrn" "issn" "issue" "issuesubtitle" "issuetitle"
-                                "journalsubtitle" "language" "location" "mainsubtitle"
-                                "maintitle" "maintitleaddon" "month" "origlanguage"
-                                "pagetotal" "part" "remark" "subtitle" "timestamp"
-                                "titleaddon" "translator" "urldate" "venue" "version"
+(defcustom ebib-hidden-fields '("addendum"
+                                "afterword"
+                                "annotator"
+                                "archiveprefix"
+                                "bookauthor"
+                                "booksubtitle"
+                                "booktitleaddon"
+                                "chapter"
+                                "commentator"
+                                "edition"
+                                "editora"
+                                "editorb"
+                                "editorc"
+                                "eid"
+                                "eprint"
+                                "eprintclass"
+                                "eprinttype"
+                                "eventdate"
+                                "eventtitle"
+                                "foreword"
+                                "holder"
+                                "howpublished"
+                                "introduction"
+                                "isbn"
+                                "isrn"
+                                "issn"
+                                "issue"
+                                "issuesubtitle"
+                                "issuetitle"
+                                "issuetitleaddon"
+                                "journaltitleadddon"
+                                "journalsubtitle"
+                                "language"
+                                "location"
+                                "mainsubtitle"
+                                "maintitle"
+                                "maintitleaddon"
+                                "month"
+                                "origlanguage"
+                                "pagetotal"
+                                "part"
+                                "primaryclass"
+                                "remark"
+                                "subtitle"
+                                "timestamp"
+                                "titleaddon"
+                                "translator"
+                                "urldate"
+                                "venue"
+                                "version"
                                 "volumes")
   "List of fields that are not displayed.
 The fields in this list are not displayed by default.  Since
 biblatex defines a large number of fields, it is not practical to
 display them all in the entry buffer.  You can make these fields
-temporarily visible with the command `\\<ebib-index-mode-map>\\[ebib-toggle-hidden]'
-or through the menu."
+temporarily visible with the command
+`\\<ebib-index-mode-map>\\[ebib-toggle-hidden]' or through the
+menu."
   :group 'ebib
   :type '(repeat (string :tag "Field")))
+
+(defcustom ebib-always-prompt-for-special-keys t
+  "Prompt for new key in already-named Xdata, Set entries."
+  :group 'ebib
+  :type 'boolean)
 
 (defcustom ebib-layout 'full
   "Ebib window layout.
 This option defines how Ebib displays the buffers it uses.  Possible values are:
 
 - `full' (default): Use the entire frame.  The existing windows
-  are hidden and reappear when Ebib is lowered.
+are hidden and reappear when Ebib is lowered.
 
 - `window': Use the current window.  This window is split up to
-  display the index and entry buffers.
+display the index and entry buffers.
 
 - `custom': Use part of the current frame.  The width of the Ebib
-  windows can be set with the option `ebib-width'.
+windows can be set with the option `ebib-width'.
 
 - `index-only': Display only the index window.  The entry buffer
-  is displayed when the user edits an entry or after pressing
-  \\<ebib-index-mode-map>\\[ebib-select-and-popup-entry]."
+is displayed when the user edits an entry or after pressing
+\\<ebib-index-mode-map>\\[ebib-select-and-popup-entry]."
   :group 'ebib-windows
   :type '(choice (const :tag "Use full frame" full)
                  (const :tag "Use current window" window)
@@ -291,23 +342,45 @@ The label \"Entry Key\" displays the entry's BibTeX key, and the
 label \"Author/Editor\" displays the contents of the Author
 field, or, if that is empty, the contents of the Editor field.
 
-Note that the default sort field is the entry key, even if the
-\"Entry Key\" field is absent from the index buffer.  You can
-remove the \"Entry Key\" field from this option, but that will
-not change the default sort."
+If the sorting flag is t, a sorting function is looked up in
+`ebib-field-sort-functions-alist', defaulting to
+`string-collate-lessp' if none is found. If it is nil, sorting is
+impossible.
+
+Note that the default sort field is the first field in this
+option.  See also `ebib-index-default-sort'."
   :group 'ebib
   :type '(repeat (list  (string :tag "Field")
                         (integer :tag "Width")
                         (boolean :tag "Sort"))))
 
 (defcustom ebib-index-default-sort nil
-  "Default sort field and direction."
+  "Default sort field and direction.
+If set, the index buffer is sorted on the specified field and in
+the specified direction.  Note that it is not necessary that the
+default sort field is visible in the index buffer."
   :group 'ebib
   :type '(choice (const :tag "Use First Index Column" nil)
                  (cons :tag "User-Defined Sort"
                        (string :tag "Sort Field")
                        (choice (const :tag "Ascending Sort" ascend)
                                (const :tag "Descending Sort" descend)))))
+
+(defun ebib-compare-numerical-strings (a b)
+  "Return t if A represents a number less than B represents.
+A and B are strings (e.g. \"3\" and \"11\")."
+  (< (string-to-number a) (string-to-number b)))
+
+(defcustom ebib-field-sort-functions-alist '(("Chapter" . ebib-compare-numerical-strings)
+					     ("Sortyear" . ebib-compare-numerical-strings)
+					     ("Volume" . ebib-compare-numerical-strings)
+					     ("Volumes" . ebib-compare-numerical-strings))
+  "Alist of bib(la)tex fields and functions for sorting the index.
+Field names are case-insensitive.  Sort functions should take two
+arguments and should return t if the first is to be sorted before
+the second."
+  :group 'ebib
+  :type '(alist :key-type string :value-type symbol))
 
 (defcustom ebib-index-column-separator "  "
   "Separator between columns in the index buffer."
@@ -330,6 +403,8 @@ transformation function returns something that can be displayed."
   :group 'ebib
   :type '(repeat (cons (string :tag "Field")
                        (function :tag "Transform function"))))
+
+(make-obsolete-variable 'ebib-TeX-markup-replace-alist 'parsebib-TeX-markup-replace-alist "Ebib 2.37")
 
 (defcustom ebib-uniquify-keys nil
   "Create unique keys.
@@ -387,9 +462,21 @@ braces is discarded as well."
 (defcustom ebib-citation-template "{Author|Editor} ({Date|Year})"
   "Template used for copying a citation to the kill ring.
 For details of the template format, see the user option
-`ebib-reference-templates'."
+                                `ebib-reference-templates'."
   :group 'ebib
   :type '(string :tag "Template"))
+
+(defvar org-link-file-path-type)
+
+(defcustom ebib-link-file-path-type (if (boundp 'org-link-file-path-type) org-link-file-path-type 'adaptive)
+  "How the path name in file links should be stored.
+Valid values are the same as `org-link-file-path-type'."
+  :group 'ebib
+  :type '(choice (const relative)
+                 (const absolute)
+                 (const noabbrev)
+	         (const adaptive))
+  :safe #'symbolp)
 
 (defun ebib--process-reference-template (template key db)
   "Process TEMPLATE for KEY in DB.
@@ -398,22 +485,22 @@ TEMPLATE is a reference template (see the option
 with the contents of the corresponding fields in the entry KEY in
 database DB."
   ;; Define some transformations; Perhaps these should be user-customizable.
-  (let ((transformations '(("Title" . ebib-clean-TeX-markup)
+  (let ((transformations '(("Title" . parsebib-clean-TeX-markup)
                            ("Date" . ebib-biblatex-date-to-year))))
     (cl-flet ((create-replacements (match)
-                                   (save-match-data
-                                     (string-match "{\\([^A-Za-z]*\\)\\([A-Za-z|]+\\)\\([^A-Za-z]*\\)}" match)
-                                     (let* ((pre (match-string 1 match))
-                                            (fields (match-string 2 match))
-                                            (post (match-string 3 match))
-                                            (field (seq-find (lambda (field)
-                                                               (ebib-get-field-value field key db 'noerror nil 'xref))
-                                                             (split-string fields "|" t)))
-                                            (value (if field (ebib-get-field-value field key db 'noerror 'unbraced 'xref))))
-                                       (if value (concat pre
-                                                         (funcall (alist-get field transformations #'identity nil #'cl-equalp) value)
-                                                         post)
-                                         "")))))
+                (save-match-data
+                  (string-match "{\\([^A-Za-z]*\\)\\([A-Za-z|]+\\)\\([^A-Za-z]*\\)}" match)
+                  (let* ((pre (match-string 1 match))
+                         (fields (match-string 2 match))
+                         (post (match-string 3 match))
+                         (field (seq-find (lambda (field)
+                                            (ebib-get-field-value field key db 'noerror nil 'xref))
+                                          (split-string fields "|" t)))
+                         (value (if field (ebib-get-field-value field key db 'noerror 'unbraced 'xref))))
+                    (if value (concat pre
+                                      (funcall (alist-get field transformations #'identity nil #'cl-equalp) value)
+                                      post)
+                      "")))))
       (replace-regexp-in-string "{.*?}" #'create-replacements template nil t))))
 
 (defcustom ebib-citation-commands '((latex-mode
@@ -505,41 +592,22 @@ description for citations in Org buffers."
   :group 'ebib
   :type 'boolean)
 
-(defcustom ebib-citation-description-function 'ebib-author-year-description
+(defcustom ebib-citation-description-function 'ebib-create-org-author/year
   "Function for creating a description to be used in citations.
 This function is called to provide a description to substitute
 for the %D directive in `ebib-citation-commands', and also when
 creating Org links with `org-store-link', provided the library
 `org-ebib' is loaded.
 
-The default value of this option provides an author/year
-description composed of the author or editor field of the entry
-and the year field, combined as \"Author (Year)\".  A second
-option is to use the Title field on an entry for the link
-description.
-
-It is also possible to specify a user-defined function.  This
-function should take two arguments: the key of the entry for
-which a description is to be created, and the database that
-contains the entry."
+Three predefined functions are provided.  In addition, it is
+possible to specify a user-defined function, which should take
+two arguments: the key of the entry for which a description is to
+be created, and the database that contains the entry."
   :group 'ebib
-  :type '(choice (function-item :tag "Author/Year" ebib-author-year-description)
-                 (function-item :tag "Title" ebib-title-description)
+  :type '(choice (function-item :tag "Author/Year" ebib-create-org-author/year)
+                 (function-item :tag "Title" ebib-create-org-title)
+                 (function-item :tag "Author/Year/Title" ebib-create-org-description)
                  (function :tag "Custom Function")))
-
-(defun ebib-author-year-description (key db)
-  "Provide an author/year description for an Org Ebib link.
-KEY is the key of the entry to provide the link for, DB the
-database that contains the entry."
-  (format "%s (%s)"
-          (ebib--get-field-value-for-display "Author/Editor" key db)
-          (ebib--get-field-value-for-display "Year" key db)))
-
-(defun ebib-title-description (key db)
-  "Provide a title description for an Org Ebib link.
-KEY is the key of the entry to provide the link for, DB the
-database that contains the entry."
-  (ebib-get-field-value "Title" key db "(Untitled)" 'unbraced 'xref))
 
 (defcustom ebib-multiline-major-mode 'text-mode
   "The major mode of the multiline edit buffer."
@@ -624,98 +692,99 @@ assumed to use this dialect.  Possible values are those listed in
                  ,@(mapcar (lambda (d) `(const ,d))
                            bibtex-dialect-list)))
 
-(defcustom ebib-biblatex-inheritances '(("all"
-                                         "all"
-                                         (("ids" . none)
-                                          ("crossref" . none)
-                                          ("xref" . none)
-                                          ("entryset" . none)
-                                          ("entrysubtype" . none)
-                                          ("execute" . none)
-                                          ("label" . none)
-                                          ("options" . none)
-                                          ("presort" . none)
-                                          ("related" . none)
-                                          ("relatedoptions" . none)
-                                          ("relatedstring" . none)
-                                          ("relatedtype" . none)
-                                          ("shorthand" . none)
-                                          ("shorthandintro" . none)
-                                          ("sortkey" . none)))
+(defcustom ebib-biblatex-inheritances '(;; Source                        Target
+                                        ("all"                           "all"
+					 (("ids"                         . none)
+					  ("crossref"                    . none)
+					  ("xdata"                       . none)
+					  ("xref"                        . none)
+					  ("entryset"                    . none)
+					  ("entrysubtype"                . none)
+					  ("execute"                     . none)
+					  ("label"                       . none)
+					  ("options"                     . none)
+					  ("presort"                     . none)
+					  ("related"                     . none)
+					  ("relatedoptions"              . none)
+					  ("relatedstring"               . none)
+					  ("relatedtype"                 . none)
+					  ("shorthand"                   . none)
+					  ("shorthandintro"              . none)
+					  ("sortkey"                     . none)))
 
-                                        ("mvbook, book"
-                                         "inbook, bookinbook, suppbook"
-                                         (("author" . "author")
-                                          ("author" . "bookauthor")))
+                                        ;; Source                        Target
+					("mvbook, book"                  "inbook, bookinbook, suppbook"
+					 (("author"                      . "author")
+					  ("author"                      . "bookauthor")))
 
-                                        ("mvbook"
-                                         "book, inbook, bookinbook, suppbook"
-                                         (("title" . "maintitle")
-                                          ("subtitle" . "mainsubtitle")
-                                          ("titleaddon" . "maintitleaddon")
-                                          ("shorttitle" . none)
-                                          ("sorttitle" . none)
-                                          ("indextitle" . none)
-                                          ("indexsorttitle" . none)))
+                                        ;; Source                        Target
+					("mvbook"                        "book, inbook, bookinbook, suppbook"
+					 (("title"                       . "maintitle")
+					  ("subtitle"                    . "mainsubtitle")
+					  ("titleaddon"                  . "maintitleaddon")
+					  ("shorttitle"                  . none)
+					  ("sorttitle"                   . none)
+					  ("indextitle"                  . none)
+					  ("indexsorttitle"              . none)))
 
-                                        ("mvcollection, mvreference"
-                                         "collection, reference, incollection, inreference, suppcollection"
-                                         (("title" . "maintitle")
-                                          ("subtitle" . "mainsubtitle")
-                                          ("titleaddon" . "maintitleaddon")
-                                          ("shorttitle" . none)
-                                          ("sorttitle" . none)
-                                          ("indextitle" . none)
-                                          ("indexsorttitle" . none)))
+                                        ;; Source                        Target
+					("mvcollection, mvreference"     "collection, reference, incollection, inreference, suppcollection"
+					 (("title"                       . "maintitle")
+					  ("subtitle"                    . "mainsubtitle")
+					  ("titleaddon"                  . "maintitleaddon")
+					  ("shorttitle"                  . none)
+					  ("sorttitle"                   . none)
+					  ("indextitle"                  . none)
+					  ("indexsorttitle"              . none)))
 
-                                        ("mvproceedings"
-                                         "proceedings, inproceedings"
-                                         (("title" . "maintitle")
-                                          ("subtitle" . "mainsubtitle")
-                                          ("titleaddon" . "maintitleaddon")
-                                          ("shorttitle" . none)
-                                          ("sorttitle" . none)
-                                          ("indextitle" . none)
-                                          ("indexsorttitle" . none)))
+                                        ;; Source                        Target
+					("mvproceedings"                 "proceedings, inproceedings"
+					 (("title"                       . "maintitle")
+					  ("subtitle"                    . "mainsubtitle")
+					  ("titleaddon"                  . "maintitleaddon")
+					  ("shorttitle"                  . none)
+					  ("sorttitle"                   . none)
+					  ("indextitle"                  . none)
+					  ("indexsorttitle"              . none)))
 
-                                        ("book"
-                                         "inbook, bookinbook, suppbook"
-                                         (("title" . "booktitle")
-                                          ("subtitle" . "booksubtitle")
-                                          ("titleaddon" . "booktitleaddon")
-                                          ("shorttitle" . none)
-                                          ("sorttitle" . none)
-                                          ("indextitle" . none)
-                                          ("indexsorttitle" . none)))
+                                        ;; Source                        Target
+					("book"                          "inbook, bookinbook, suppbook"
+					 (("title"                       . "booktitle")
+					  ("subtitle"                    . "booksubtitle")
+					  ("titleaddon"                  . "booktitleaddon")
+					  ("shorttitle"                  . none)
+					  ("sorttitle"                   . none)
+					  ("indextitle"                  . none)
+					  ("indexsorttitle"              . none)))
 
-                                        ("collection, reference"
-                                         "incollection, inreference, suppcollection"
-                                         (("title" . "booktitle")
-                                          ("subtitle" . "booksubtitle")
-                                          ("titleaddon" . "booktitleaddon")
-                                          ("shorttitle" . none)
-                                          ("sorttitle" . none)
-                                          ("indextitle" . none)
-                                          ("indexsorttitle" . none)))
+                                        ;; Source                        Target
+					("collection, reference"         "incollection, inreference, suppcollection"
+					 (("title"                       . "booktitle")
+					  ("subtitle"                    . "booksubtitle")
+					  ("titleaddon"                  . "booktitleaddon")
+					  ("shorttitle"                  . none)
+					  ("sorttitle"                   . none)
+					  ("indextitle"                  . none)
+					  ("indexsorttitle"              . none)))
 
-                                        ("proceedings"
-                                         "inproceedings"
-                                         (("title" . "booktitle")
-                                          ("subtitle" . "booksubtitle")
-                                          ("titleaddon" . "booktitleaddon")
-                                          ("shorttitle" . none)
-                                          ("sorttitle" . none)
-                                          ("indextitle" . none)
-                                          ("indexsorttitle" . none)))
+                                        ;; Source                        Target
+					("proceedings"                   "inproceedings"
+					 (("title"                       . "booktitle")
+					  ("subtitle"                    . "booksubtitle")
+					  ("titleaddon"                  . "booktitleaddon")
+					  ("shorttitle"                  . none)
+					  ("sorttitle"                   . none)
+					  ("indextitle"                  . none)
+					  ("indexsorttitle"              . none)))
 
-                                        ("periodical"
-                                         "article, suppperiodical"
-                                         (("title" . "journaltitle")
-                                          ("subtitle" . "journalsubtitle")
-                                          ("shorttitle" . none)
-                                          ("sorttitle" . none)
-                                          ("indextitle" . none)
-                                          ("indexsorttitle" . none))))
+                                        ;; Source                        Target
+					("periodical"                    "article, suppperiodical"
+					 (("title"                       . "journaltitle")
+					  ("subtitle"                    . "journalsubtitle")
+					  ("shorttitle"                  . none)
+					  ("sorttitle"                   . none)
+					  ("indextitle"                  . none)
+					  ("indexsorttitle"              . none))))
   "Inheritance scheme for cross-referencing.
 This option defines inheritances for BibLaTeX.  Inheritances are
 specified for pairs of source and target entry type, where the
@@ -745,6 +814,15 @@ BibTeX dialect is set to `BibTeX', this option is ignored."
                                      (choice (string :tag "Target field)")
                                              (const :tag "No inheritance" none)))))))
 
+(defcustom ebib-follow-current-field-crossref t
+  "Consider only current crossref fields when following crossrefs.
+If non-nil, `ebib-follow-crossref' will only consider keys
+present in the value of the current field, when called with point
+on a field which crossrefs other entries (`crossref', `xdata' or
+`xref')."
+  :group 'ebib
+  :type 'boolean)
+
 (defcustom ebib-save-xrefs-first t
   "Save entries with a crossref field first in the BibTeX-file.
 For BibTeX's cross-referencing to work, the cross-referencing
@@ -756,6 +834,16 @@ crossreferencing options work as intended.
 Note: this option is not compatible with setting the option
 `ebib-sort-order'.  If you want to use the latter, unset this
 one."
+  :group 'ebib
+  :type 'boolean)
+
+(defcustom ebib-save-indent-as-bibtex nil
+  "If non-nil, use `bibtex-mode' variables for indentation when saving.
+By default, when saving a `.bib' file, Ebib uses a single TAB
+character to indent fields.  When this option is set, Ebib uses
+the values of the variables `bibtex-entry-offset' and
+`bibtex-field-indentation' to compute the indentation and indents
+using spaces."
   :group 'ebib
   :type 'boolean)
 
@@ -785,17 +873,23 @@ string."
 
 (make-obsolete-variable 'ebib-url-field "The default URL field can no longer be customized" "Ebib 2.27")
 
-(defcustom ebib-url-regexp "\\\\url{\\(.*\\)}\\|https?://[^ ';<>\"\n\t\f]+"
+(defcustom ebib-url-regexp "\\\\url{\\(?1:.*\\)}\\|\\(?1:https?://[^ ';<>\"\n\t\f]+\\)"
   "Regular expression to extract URLs from a field.
 This is the regular expression that Ebib uses to search for URLs
 in a field.  With the default value, Ebib considers everything
-that is in a LaTeX `\\url{...}' command as a URL, and furthermore
-every string of text that starts with `http://' or `https://' and
-does not contain whitespace or one of the characters ' \" ; < or >.
+that is in a LaTeX \"\\url{...}\" command as a URL, and
+furthermore every string of text that starts with \"http://\" or
+\"https://\" and does not contain whitespace or one of the
+characters ' \" ; < or >.
 
-Note that the semicolon is added for consistency: it makes it
-possible to use the same separator in the `url' field as in the
-`file' field."
+The semicolon is included in this set for consistency: it makes
+it possible to use the same separator in the `url' field as in
+the `file' field.  Note that this is not a necessity: URLs can be
+separated on whitespace.
+
+If you customize this option, make sure to use an explicitly
+numbered group to enclose the actual URL, since this is what the
+function `ebib--split-urls' expects."
   :group 'ebib
   :type 'string)
 
@@ -877,34 +971,69 @@ to handle a URL on the command line."
   :type '(choice (const :tag "Use standard browser" nil)
                  (string :tag "Specify browser command")))
 
+(defcustom ebib-doi-resolver "https://doi.org/"
+  "URL to use as a DOI resolver for the \"doi\" field.
+By default, use the DOI Foundation's preferred proxy,
+https://doi.org/.  Note that this URL must end in a slash."
+  :group 'ebib
+  :type '(string :tag "DOI resolver"
+                 :validate (lambda (widget)
+                             (unless (string-suffix-p "/" (widget-value widget))
+                               (widget-put widget :error "[Ebib] DOI resolver must end in a slash.")
+                               widget))))
+
 (make-obsolete-variable 'ebib-doi-field "The default DOI field can no longer be customized" "Ebib 2.27")
 
 (make-obsolete-variable 'ebib-file-field "The standard file field can no longer be customized" "Ebib 2.27")
 
-(defcustom ebib-import-directory "~/Downloads"
+(defcustom ebib-import-source-directory "~/Downloads/"
   "Directory to import files from.
 When using the command `ebib-import-file', this directory is
-offered as the default directory."
+offered as the default directory to import a file from."
   :group 'ebib
   :type 'directory)
+
+(make-obsolete-variable 'ebib-import-directory 'ebib-import-source-directory "Ebib 2.41")
+
+(defcustom ebib-import-target-directory 'first-search-dir
+  "Directory to save imported files to.
+Valid values are the symbol `first-search-dir', which means to
+use the first directory in `ebib-file-search-dirs', the symbol
+`current-db', which means to use the directory of the current
+database, the symbol `ask', which means to ask the user each
+time, or a directory path (as a string)."
+  :group 'ebib
+  :type '(choice (const :tag "Use first directory in `ebib-file-search-dirs'" first-search-dir)
+                 (const :tag "Use directory of current database" current-db)
+                 (directory :tag "Set fixed directory")
+                 (const :tag "Ask the user each time" ask)))
 
 (defcustom ebib-file-associations '(("pdf" . "xpdf")
                                     ("ps" . "gv"))
   "List of file associations.
-Lists file extensions together with external programs to handle
-files with those extensions.  If the program string contains a
-literal `%s', it is replaced with the name of the file being
-opened, allowing the use of command line options.  Otherwise, the
-string is treated as an executable, searched for in the variable
-`exec-path'.
+Lists of (EXT . HANDLER), where EXT is a file extension like
+\"pdf\" or \"ps\" (without dot), and HANDLER is a method to
+handle files with those extensions.
 
-When you open a file for which no external program is defined,
-the file is opened in Emacs."
+HANDLER can be a string, in which case it should be the name of
+an executable, which is searched for in the variable `exec-path'.
+The string can also contain command-line options to be passed to
+the executable.  In this case, the string should also contain
+\"%s\", which will be replaced with the path to the file being
+opened.
+
+HANDLER can also be an Emacs Lisp function, which should take one
+argument, the path to the file being opened.
+
+When you open a file for which no HANDLER is defined, or for
+which HANDLER is empty, the file is opened in Emacs using the
+function `find-file'."
   :group 'ebib
   :type '(repeat (cons :tag "File association"
                        (string :tag "Extension")
                        (choice (const :tag "Open in Emacs" nil)
-                               (string :tag "Run external command")))))
+                               (string :tag "Run external command")
+			       (function :tag "Run Emacs Lisp function")))))
 
 (defcustom ebib-filename-separator "; "
   "Separator for filenames in the \"file\" field'.
@@ -1039,17 +1168,53 @@ Ebib (not Emacs)."
                  (const :tag "Show the cursor" nil)))
 
 (make-obsolete-variable 'ebib-edit-author/editor-without-completion 'ebib-fields-with-completion "Ebib 2.27")
+(make-obsolete-variable 'ebib-fields-with-completion 'ebib-field-edit-functions "Ebib 2.34")
 
-(defcustom ebib-fields-with-completion '("author" "crossref" "file" "keywords" "journal" "journaltitle" "organization" "publisher" "booktitle")
-  "Fields that are edited using completion.
-When editing a field in this list, Ebib offers a sensible set of
-possible completion candidates (see the manual for details).
+(defcustom ebib-field-edit-functions '((("abstract" "addendum" "note" "annotation")
+					. ebib--edit-field-as-multiline)
+				       (("afterword" "annotator" "author" "bookauthor"
+					 "commentator" "editor" "editora" "editorb"
+					 "editorc" "foreword" "holder" "introduction"
+					 "sortname" "translator")
+					. ebib--edit-list-field)
+				       (("bookpagination" "pagination") . ebib--edit-pagination-field)
+				       (("crossref" "xref")           . ebib--edit-ref-field)
+				       (("editortype" "editoratype" "editorbtype" "editorctype")
+					. ebib--edit-editor-type-field)
+				       (("execute")                   . ebib--edit-TeX-code-field)
+				       (("file")		      . ebib--edit-file-field)
+				       (("institution")               . ebib--edit-list-field)
+				       (("journal" "journaltitle")    . ebib--edit-literal-field)
+				       (("keywords")		      . ebib--edit-separated-values-field)
+				       (("langid")                    . ebib--edit-lang-id-field)
+				       (("language" "origlanguage")   . ebib--edit-language-field)
+				       (("location" "origlocation")   . ebib--edit-literal-field)
+				       (("organization")	      . ebib--edit-list-field)
+				       (("publisher" "origpublisher") . ebib--edit-list-field)
+				       (("pubstate")                  . ebib--edit-pubstate-field)
+				       (("related" "xdata" "entryset") . ebib--edit-ref-list-field)
+				       (("venue")                     . ebib--edit-literal-field)
+				       (("booktitle")                 . ebib--edit-literal-field))
+  "Alist of completion functions for fields.
+The car of each element is a list of fields, which must all have
+the same BibLaTeX type.  When any of the fields is edited, the
+completion function in the cdr of the element is called with
+three arguments: the field to be edited, the complete list of
+fields in the car and the original contents of the field as a
+string as a string if non-empty, or nil otherwise.
 
-Note that the \"author\" field also implies the \"editor\" field
-and that \"crossref\" also implies the \"xref\" and \"related\"
-fields."
+If the original contents of the field being edited were braced,
+`ebib-edit-field' will preserve this bracing, but will pass an
+unbraced string to the relevant function.  As such, the functions
+should not handle bracing.
+
+Functions should prompt for a value, using the name of the edited
+field in the prompt string, and completing on values of the
+fields in the list where appropriate.  They should return a
+string, suitable as a field value."
   :group 'ebib
-  :type '(repeat (string :tag "Field")))
+  :type '(repeat (cons (repeat :tag "Fields" (string))
+		       (function :tag "Completion function"))))
 
 (defcustom ebib-multiline-fields '("annote" "annotation" "abstract")
   "Fields that are edited as multiline fields by default."
@@ -1067,7 +1232,7 @@ file.  If this option is set, the database is automatically saved."
   :type '(choice (const :tag "Save dependent database after citation" t)
                  (const :tag "Only save dependent databases manually" nil)))
 
-(defgroup ebib-faces nil "Faces for Ebib" :group 'ebib)
+(defgroup ebib-faces nil "Faces for Ebib." :group 'ebib)
 
 (defface ebib-highlight-extend-face `((t (:inherit highlight
                                                    ,@(and (>= emacs-major-version 27) '(:extend t)))))
@@ -1084,6 +1249,10 @@ file.  If this option is set, the database is automatically saved."
 
 (defface ebib-alias-face '((t (:inherit warning)))
   "Face used to indicate values inherited from crossreferenced entries."
+  :group 'ebib-faces)
+
+(defface ebib-abbrev-face '((t  (:inherit font-lock-doc-face)))
+  "Face used to indicate expanded abbreviated/concatenated strings."
   :group 'ebib-faces)
 
 (defface ebib-marked-face '((t (:inverse-video t)))
@@ -1136,6 +1305,23 @@ Currently, the following problems are marked:
 (defvar ebib--citation-history nil "Minibuffer history for citation commands.")
 (defvar ebib--key-history nil "Minibuffer history for entry keys.")
 (defvar ebib--keywords-history nil "Minibuffer history for keywords.")
+(defvar ebib--entry-history '(:head 0 :history nil)
+  "History of entries visited.
+`:history' is a list of all entries visited, with more recent
+entries nearer the beginning.  `:head' is a 0-based index
+indicating where in the `:history' list we are currently.
+
+Commands which navigate between entries (including those which
+navigate the history) should (in order):
+- Copy everything from the second to the `:head'th element of the
+  `:history' list, reverse the result, and prepend it to the history
+  list (unless the `:head' value is less than 2, in which case nothing
+  would be prepended).
+- Prepend the key of the entry arrived at to the `:history' list.
+- Set `:head' to 0
+
+Passing the relevant key to `ebib--history-mutate' will achieve
+all of this in a convenient way.")
 
 (defvar ebib--saved-window-config nil "Stores the window configuration when Ebib is called.")
 (defvar ebib--window-before nil "The window that was active when Ebib was called.")
@@ -1411,58 +1597,62 @@ separated by `ebib-filename-separator'."
 (defun ebib--select-file (files n key)
   "Split FILES into separate files and return the Nth.
 FILES should be a string of file names separated by
-`ebib-filename-separator'.  If there is only one file name in
-FILES, it is returned regardless of the value of N.  If N is nil,
-the user is asked to enter a number, unless there is only one
-file in FILES, in which case that one is chosen automatically.
-If FILES is nil, a file name is created on the basis of KEY.  See
-the function `ebib--create-file-name-from-key' for details."
+`ebib-filename-separator'.  N counts from 1.
+
+If there is only one file name in FILES, it is returned
+regardless of the value of N.  If N is nil, the user is asked to
+select a file.
+
+If FILES is nil, a file name is created on the basis of KEY,
+using the function `ebib--create-file-name-from-key'."
   (if (not files)
       (ebib--create-file-name-from-key key "pdf")
     (let ((file-list (ebib--split-files files)))
       (cond
        ((= (length file-list) 1)
-        (setq n 1))
+        (car file-list))
        ((null n)
-        (setq n (string-to-number (read-string (format "Select file [1-%d]: " (length file-list)))))))
-      (unless (<= 1 n (length file-list))  ; Unless n is within range.
-        (error "[Ebib] No such file (%d)" n))
-      (nth (1- n) file-list))))
+        (completing-read "Select file: " file-list nil t))
+       ((numberp n)
+        (if (<= 1 n (length file-list))  ; See if n is within range.
+            (nth (1- n) file-list)
+          (error "[Ebib] Number %d does not correspond to a file" n)))))))
 
 (defun ebib--split-urls (urls)
   "Split URLS (a string) into separate URLs.
-Return value is a list of strings.  The URLs in URLS are
-  separated using `ebib-url-regexp'."
+Return a list of strings, each a URL.  If the LaTeX command
+\\url{...} encloses a URL, it is removed.  See the user option
+`ebib-url-regexp' for details."
   (let ((start 0)
         (result nil))
     (while (string-match ebib-url-regexp urls start)
-      (push (match-string 0 urls) result)
+      (push (match-string 1 urls) result)
       (setq start (match-end 0)))
     (nreverse result)))
 
 (defun ebib--select-url (urls n)
   "Select a URL from URLS.
-URLS is a string containing one or more URLs.  URLS is split
-using `ebib-url-regexp' and the Nth URL is returned.  If N is
-nil, the user is asked which URL to select, unless there is only
-one.  If URLS is nil or does not contain any valid URLs, raise an
-error."
+URLS is a string containing one or more URLs.  N counts from 1.
+
+URLS is split using `ebib-url-regexp' and the Nth URL is
+returned.  If N is nil, the user is asked which URL to select,
+unless there is only one.  If URLS is nil or does not contain any
+valid URLs, raise an error."
   (unless urls
-    (error "[Ebib] No URLs found"))
-  (setq urls (ebib--split-urls urls))
-  (unless urls
-    (error "[Ebib] No valid URLs found"))
+    (error "[Ebib] URL field is empty"))
+  (unless (setq urls (ebib--split-urls urls))
+    (error "[Ebib] No valid URLs found in URL field"))
   (cond
    ((= (length urls) 1)
-    (setq n 1))
+    (car urls))
    ((null n) ; The user didn't provide a numeric prefix argument.
-    (setq n (string-to-number (read-string (format "Select URL to open [1-%d]: " (length urls)))))))
-  (unless (<= 1 n (length urls))  ; Unless n is within range.
-    (error "[Ebib] No such URL (%d)" n))
-  (let ((url (nth (1- n) urls)))
-    (if (string-match "\\\\url{\\(.*?\\)}" url) ; See if the url is contained in \url{...}.
-        (setq url (match-string 1 url)))
-    url))
+    (completing-read "Select URL to open: " urls nil t))
+   ((numberp n)
+    (if (<= 1 n (length urls))  ; See if n is within range.
+        (nth (1- n) urls)
+      (error "[Ebib] Number %d does not correspond to a URL" n)))))
+
+;; Template specifiers for Org
 
 (defun ebib-create-org-identifier (key _)
   "Create a unique identifier for KEY for use in an org file.
@@ -1470,26 +1660,28 @@ The key is prepended with the string \"Custom_id:\", so that it
 can be used in a :PROPERTIES: block."
   (format ":Custom_id: %s" key))
 
+(defun ebib-create-org-author/year (key db)
+  "Return a title for an Org mode note for KEY in DB.
+The title is formed from the author(s) / editor(s) of the entry and its year."
+  (let ((author (or (ebib-get-field-value "author" key db 'noerror 'unbraced 'xref 'expand-strings 'org)
+                    (ebib-get-field-value "editor" key db "(No Author)" 'unbraced 'xref 'expand-strings 'org)))
+        (year (ebib-get-year-for-display key db)))
+    (format "%s (%s)" author year)))
+
 (defun ebib-create-org-title (key db)
   "Return a title for an Org mode note for KEY in DB.
-The title is formed from the title of the entry.  Newlines are
-removed from the resulting string."
-  (ebib--ifstring (title (ebib-clean-TeX-markup-from-entry "title" key db))
-      (remove ?\n (format "%s" title))
-    "(No Title)"))
+The title is formed from the title of the entry."
+  (ebib-get-field-value "title" key db "(No Title)" 'unbraced 'xref 'expand-strings 'org))
 
 (defun ebib-create-org-description (key db)
   "Return a description for an Org mode note for KEY in DB.
 The title is formed from the author(s) or editor(s) of the entry,
-its year and its title.  Newlines are removed from the resulting
-string."
-  (let ((author (or (ebib-get-field-value "author" key db 'noerror 'unbraced 'xref)
-                    (ebib-get-field-value "editor" key db 'noerror 'unbraced 'xref)
-                    "(No Author)"))
+its year and its title."
+  (let ((author (or (ebib-get-field-value "author" key db 'noerror 'unbraced 'xref 'expand-strings 'org)
+                    (ebib-get-field-value "editor" key db "(No Author)" 'unbraced 'xref 'expand-strings 'org)))
         (year (ebib-get-year-for-display key db))
-        (title (or (ebib-get-field-value "title" key db 'noerror 'unbraced 'xref)
-                   "(No Title)")))
-    (remove ?\n (format "%s (%s): %s" author year title))))
+        (title (ebib-get-field-value "title" key db "(No Title)" 'unbraced 'xref 'expand-strings 'org)))
+    (format "%s (%s): %s" author year title)))
 
 (defun ebib-create-org-cite (key _db)
   "Return a citation for an Org mode note for KEY in DB."
@@ -1512,13 +1704,24 @@ empty string."
 
 (defun ebib-create-org-file-link (key db)
   "Create an org link to the file in entry KEY in DB.
-The file is taken from the \"file\" filed in the entry designated
+The file is taken from the \"file\" field in the entry designated
 by KEY in the current database.  If that field contains more than
 one file name, the user is asked to select one.  If
 the \"file\" field is empty, return the empty string."
   (let ((files (ebib-get-field-value "file" key db 'noerror 'unbraced 'xref)))
     (if files
-        (format "[[file:%s]]" (ebib--expand-file-name (ebib--select-file files nil key)))
+        (let* ((absolute-path (ebib--expand-file-name (ebib--select-file files nil key)))
+               (relative-path (file-relative-name absolute-path default-directory))
+               (abbreviate-path (abbreviate-file-name absolute-path))
+               (final-path
+                (cl-case ebib-link-file-path-type
+                  (relative relative-path)
+                  (adaptive (if (string-match (concat "^" (regexp-quote default-directory))
+                                              absolute-path)
+                                relative-path
+                              abbreviate-path))
+                  (otherwise absolute-path))))
+          (format "[[file:%s]]" final-path))
       "")))
 
 (defun ebib-create-org-doi-link (key db)
@@ -1530,6 +1733,79 @@ the empty string."
     (if doi (format "[[doi:%s]]" doi) "")))
 
 (defun ebib-create-org-url-link (key db)
+  "Create an org link to the URL in entry KEY in DB.
+The URL is taken from \"url\" in the entry designated by KEY in
+the current database.  If that field contains more than one url,
+the user is asked to select one.  If \"url\" is empty, return the
+empty string."
+  (let* ((urls (ebib-get-field-value "url" key db 'noerror 'unbraced 'xref))
+         (url (ebib--select-url urls nil)))
+    (if url (format "[[%s]]" url) "")))
+
+;; Template specifiers for Markdown
+
+(defun ebib-create-markdown-identifier (key _)
+  "Create a unique identifier for KEY for use in a Markdown file.
+The identifier consists of the entry key, prepended with the
+string \"ID:\", to avoid confusion with citations."
+  (format "ID:%s" key))
+
+(defun ebib-create-markdown-title (key db)
+  "Return a title for a Markdown note for KEY in DB.
+The title is formed from the title of the entry.  Newlines are
+removed from the resulting string."
+  (ebib-get-field-value "title" key db "(No Title)" 'unbraced 'xref 'expand-strings 'markdown))
+
+(defun ebib-create-markdown-description (key db)
+  "Return a description for a Markdown note for KEY in DB.
+The title is formed from the author(s) or editor(s) of the entry,
+its year and its title.  Newlines are removed from the resulting
+string."
+  (let ((author (or (ebib-get-field-value "author" key db 'noerror 'unbraced 'xref 'expand-strings 'markdown)
+                    (ebib-get-field-value "editor" key db "(No Author)" 'unbraced 'xref 'expand-strings 'markdown)))
+        (year (ebib-get-year-for-display key db))
+        (title (ebib-get-field-value "title" key db "(No Title)" 'unbraced 'xref 'expand-strings 'markdown)))
+    (format "%s (%s): %s" author year title)))
+
+(defun ebib-create-markdown-cite (key _db)
+  "Return a citation for a Markdown note for KEY in DB."
+  (format "@%s" key))
+
+(defun ebib-create-markdown-link (key db)
+  "Create a Markdown link for KEY in DB.
+Check the entry designated by KEY whether it has a file, a DOI or
+a URL (in that order) and use the first element found to create a
+link.  If none of these elements is found, return the empty
+string."
+  (cond
+   ((ebib-get-field-value "file" key db 'noerror 'unbraced 'xref)
+    (ebib-create-markdown-file-link key db))
+   ((ebib-get-field-value "doi" key db 'noerror 'unbraced 'xref)
+    (ebib-create-markdown-doi-link key db))
+   ((ebib-get-field-value "url" key db 'noerror 'unbraced 'xref)
+    (ebib-create-markdown-url-link key db))
+   (t "")))
+
+(defun ebib-create-markdown-file-link (key db)
+  "Create an org link to the file in entry KEY in DB.
+The file is taken from the \"file\" field in the entry designated
+by KEY in the current database.  If that field contains more than
+one file name, the user is asked to select one.  If
+the \"file\" field is empty, return the empty string."
+  (let ((files (ebib-get-field-value "file" key db 'noerror 'unbraced 'xref)))
+    (if files
+        (format "<file://%s>" (ebib--expand-file-name (ebib--select-file files nil key)))
+      "")))
+
+(defun ebib-create-markdown-doi-link (key db)
+  "Create an org link to the DOI in entry KEY in DB.
+The file is taken from the \"doi\" in the entry designated by KEY
+in the current database.  If the \"doi\" field is empty, return
+the empty string."
+  (let ((doi (ebib-get-field-value "doi" key db 'noerror 'unbraced 'xref)))
+    (if doi (format "<doi:%s>" doi) "")))
+
+(defun ebib-create-markdown-url-link (key db)
   "Create an org link to the URL in entry KEY in DB.
 The URL is taken from \"url\" in the entry designated by KEY in
 the current database.  If that field contains more than one url,
@@ -1686,7 +1962,7 @@ nil, braces are added if not already present.  NOBRACE may also be
 the symbol `as-is', in which case the value is stored as is.
 
 A field can be removed from the entry by passing nil as VALUE and
-setting IF-EXISTS to 'overwrite.
+setting IF-EXISTS to `overwrite'.
 
 Return t upon success, or nil if the value could not be stored."
   (if (eq if-exists 'append)
@@ -1714,7 +1990,190 @@ Return t upon success, or nil if the value could not be stored."
         (setq value (ebib-brace value)))
       (ebib-db-set-field-value field value key db 'overwrite))))
 
-(defun ebib-get-field-value (field key db &optional noerror unbraced xref)
+(defcustom ebib-expand-strings t
+  "Whether to expand abbreviated/concatenated fields for display.
+If set to t, string abbreviations and concatenations are always
+expanded.  If a list of strings, then fields which match one of
+the members (case-insensitively) will be expanded.  If a field
+with an alias is expanded, values in the alias field are expanded
+too.  If only the alias name is in the list, only the alias is
+expanded.  If set to nil, nothing is ever expanded.
+
+Expanded values are shown in `ebib-abbrev-face'.
+
+When editing a field, the actual (unexpanded) value is always
+shown."
+  :group 'ebib
+  :type '(choice (const :tag "Always expand" t)
+                 (const :tag "Never expand" nil)
+		 (repeat :tag "Expand only listed fields" (string :tag "Field"))))
+
+(defun ebib-get-entry (key db &optional noerror xref)
+  "Return entry KEY in database DB as an alist.
+The entry is returned as an alist of (FIELD . VALUE) pairs.
+Trigger an error if KEY does not exist, unless NOERROR is t.  If
+XREF is non-nil, add any fields that are inherited from a
+cross-referenced entry to the alist.  Note that inherited fields
+are not marked in any way, so they cannot be distinguished in the
+return value."
+  (if-let* ((entry (ebib-db-get-entry key db noerror))
+	    (xref)
+            (inheritances (if (eq (ebib--get-dialect db) 'BibTeX)
+                              'BibTeX
+                            ebib-biblatex-inheritances))
+	    (xref-key-alist (ebib--get-xref-alist key db)))
+      ;; Try inheriting from each key in `xref-key-alist' in turn,
+      ;; until `value' is non-nil
+      (cl-loop for (xref-type . xref-key) in xref-key-alist
+	       do
+	       (when-let* (((ebib-db-has-key xref-key db))
+			   (xref-entry (ebib-get-entry xref-key db noerror 'xref))
+			   (source-type (ebib-db-get-field-value "=type=" xref-key db noerror))
+			   ;; When the cross-reference is from an xdata field, check if entry
+			   ;; referred to is an @Xdata entry. Otherwise anything is fine.
+			   ((if (cl-equalp xref-type "xdata")
+			        (cl-equalp source-type "xdata")
+			      t)))
+		 (setq entry (parsebib--get-xref-fields entry xref-entry inheritances)))
+	       finally return entry)
+    entry))
+
+(defun ebib--propertize-xdata-warnings (parts xkey xfield &optional xindex help-echo)
+  "Return a granular xdata ref string with warning properties.
+PARTS is a list containing any the symbols `key' `field' and
+`index', in any order.  XKEY is the key of the XData entry being
+referred to.  XFIELD is the field referred to in that entry,
+.XINDEX is the index of the item in the value of the field, if
+provided.  See the BibLaTeX manual, section 3.13.6 for more
+details.
+
+Returns a string \"xdata-XKEY-XFIELD[-XINDEX]\". XINDEX and the
+preceding dash are only included if XINDEX is non-nil. Each of the
+items in PARTS is highlighted in `ebib-warning-face'. Dashes between
+two adjacent highlighted parts are also highlighted. All highlighted
+parts also have their `help-echo' text property set to HELP-ECHO.
+
+Intended as a convenience function for use in
+`ebib--replace-granular-xdata-references'."
+  (concat
+   "xdata="
+   (apply 'propertize `(,xkey ,@(when (member 'key parts) `(face ebib-warning-face help-echo ,help-echo))))
+   (apply 'propertize `("-" ,@(when (and (member 'key parts) (member 'field parts))
+				`(face ebib-warning-face help-echo ,help-echo))))
+   (apply 'propertize `(,xfield ,@(when (member 'field parts) `(face ebib-warning-face help-echo ,help-echo))))
+   (when xindex
+     (concat
+      (apply 'propertize `("-" ,@(when (and (member 'field parts) (member 'index parts))
+				   `(face ebib-warning-face help-echo ,help-echo))))
+      (apply 'propertize `(,xindex ,@(when (member 'index parts) `(face ebib-warning-face help-echo ,help-echo))))))))
+
+(defun ebib--replace-granular-xdata-references (string db)
+  "Replace xdata references within STRING with their values.
+Replace all strings of the form \"xdata=-KEY-FIELD[-INDEX]\" with
+the value of FIELD in entry with KEY.  If INDEX is present, parse
+the value as a list (splitting on \"and\" and removing
+surrounding whitespace) and return the element at INDEX,
+beginning at 1.
+
+See BibLaTeX manual, Sec. 3.13.6 for more details.
+
+DB is the database to use when finding the database for each
+KEY (see `ebib--find-db-for-key').
+
+If successful, replaced text has the text property `ebib--xref', with
+the key of the entry inherited from as its value.
+
+If unsuccessful, text is propertized appropriately:
+- if the entry at KEY does not exist, or is not an xdata entry,
+  highlight key with `ebib-warning-face' and set the help-echo
+  property to an explanatory message.
+- if INDEX is present, but the field is not indexable (i.e. is known
+  to be of a type which is not a list), highlight FIELD-INDEX and set
+  help-echo saying that FIELD is not indexable
+- If INDEX is present but there are not enough items, highlight just
+  INDEX, and set appropriate help-echo message."
+  (let ((xdata-regexp (rx "xdata="
+			  (group (one-or-more (in alnum  ?_ ?: ?\; ?! ??))) ;; Key of @XData entry
+			  "-"
+			  (group (one-or-more (in alpha))) ;; Field in @XData entry
+			  (optional "-" (group (one-or-more (in digit)))))) ;; Optional index into field value
+	(get-xdata-function
+	 (lambda (match-text)
+	   (let ((xdata-key (match-string 1 match-text))
+		 (xdata-field (match-string 2 match-text))
+		 (xdata-index (match-string 3 match-text)))
+	     ;; Does the entry exist?
+	     (if (not (ebib-db-get-entry xdata-key db t))
+		 (ebib--propertize-xdata-warnings '(key) xdata-key xdata-field nil (format "No entry with key `%s'" xdata-key))
+	       (let* ((xdata-db (ebib--find-db-for-key xdata-key db))
+		      (xdata-value (ebib-unbrace (ebib-get-field-value
+						  xdata-field xdata-key xdata-db 'noerror 'xref 'expand-strings))))
+		 (cond ;; Is it an xdata entry?
+		  ((not (cl-equalp "xdata" (ebib-db-get-field-value "=type=" xdata-key xdata-db 'noerror)))
+		   (ebib--propertize-xdata-warnings '(key) xdata-key xdata-field (or xdata-index) (format "`%s' is not an @XData entry" xdata-key)))
+		  ;; Is there a value?
+		  ;; TODO check that this is the right format
+		  ((not xdata-value)
+		   (ebib--propertize-xdata-warnings
+		    '(key field) xdata-key xdata-field (or xdata-index)
+		    (format "No value for `%s' in entry `%s'" xdata-field xdata-key)))
+		  ;; Is there an index?
+		  (xdata-index
+		   ;; Is the field indexable?
+		   (if (or (member
+			    xdata-field
+			    '("address" "afterword" "annotator" "author"
+			      "bookauthor" "commentator" "editor"
+			      "editora" "editorb" "editorc" "foreword"
+			      "holder" "institution" "introduction"
+			      "language" "location" "organization"
+			      "origlanguage" "origlocation" "origpublisher"
+			      "pageref" "publisher" "school" "shortauthor"
+			      "shorteditor" "sortname" "translator"))
+			   ;; ...or is it field which only the user uses (valid because
+			   ;; BibLaTeX ignores fields it doesn't know about)...
+			   (not (member xdata-field (mapcar #'car bibtex-biblatex-field-alist))))
+		       (if-let* ((val (nth (- (string-to-number xdata-index) 1)
+					   (save-match-data
+					     (split-string xdata-value "and" t "[[:space:]]*")))))
+			   (propertize val 'ebib--xref xdata-key)
+			 (ebib--propertize-xdata-warnings '(index) xdata-key xdata-field xdata-index "Not enough items in field"))
+		     (ebib--propertize-xdata-warnings '(field index) xdata-key xdata-field xdata-index (format "`%s' is not an indexable field" xdata-field))))
+		  ;; Everything is good, no index, just return the value
+		  (t (propertize xdata-value 'ebib--xref xdata-key)))))))))
+    (replace-regexp-in-string xdata-regexp get-xdata-function string)))
+
+(defun ebib--get-xref-alist (key db)
+  "Return an alist of cross-referencing keys in entry KEY, in DB.
+Only keys entered as values in the \"crossref\", \"xdata\" and
+\"xref\" fields are considered (keys used in \"granular\" xdata
+entries like \"xdata=fookey-foofield\" are not considered).
+
+The car of each element is the string name of the field
+referencing the key (\"xdata\" or \"crossref\").  The cdr is the
+key itself.
+
+Keys in the \"xdata\" field are listed first, in the same order
+as in the entry. The crossref key is listed last.  This reflects
+the precedence given to these keys by BibLaTeX's inheritance
+system."
+  (let* ((xdata-field-value (ebib-get-field-value "xdata" key db 'noerror 'unbraced))
+	 (xdata-key-list (when xdata-field-value
+			   (save-match-data (split-string xdata-field-value ",[[:space:]]*"))))
+	 (crossref-key (ebib-get-field-value "crossref" key db 'noerror 'unbraced))
+	 (xref-key (ebib-get-field-value "xref" key db 'noerror 'unbraced)))
+    ;; Alist of name of refering field, and bibkey to which it refers. Order
+    ;; matters here -- earlier xdata keys take precedence, then later ones, then
+    ;; the crossref key (this follows the BibLaTeX implementation).  As a
+    ;; precaution, cross-referencing fields that reference the entry itself are
+    ;; removed, because they would throw Ebib in an infinite loop.
+    (cl-remove-if (lambda (e)
+                    (string= key (cdr e)))
+                  `(,@(mapcar (lambda (key) `("xdata" . ,key)) xdata-key-list)
+                    ,@(when crossref-key `(("crossref" . ,crossref-key)))
+                    ,@(when xref-key `(("xref" . ,xref-key)))))))
+
+(defun ebib-get-field-value (field key db &optional noerror unbraced xref expand-strings replace-TeX)
   "Return the value of FIELD in entry KEY in database DB.
 If FIELD or KEY does not exist, trigger an error, unless NOERROR
 is non-nil.  In this case, if NOERROR is a string, return NOERROR,
@@ -1728,20 +2187,42 @@ key of the entry from which the field value was retrieved.
 
 Similarly, the value can be retrieved from an alias field.  (See
 the variable `ebib--field-aliases').  In this case, the returned
-string has the text property `ebib--alias' with value t."
+string has the text property `ebib--alias' with value t.
+
+If EXPAND-STRINGS is non-nil and the field is unbraced then
+abbreviation strings and concatenation are expanded.  The result
+has the text property `ebib--expanded' with value t.
+
+If REPLACE-TEX is non-nil, TeX markup is cleaned up using the
+function `parsebib-clean-TeX-markup'.  The value of REPLACE-TEX
+should be one of the symbols `display', `org' or `markdown',
+indicating the type of clean-up to be done.  See the variable
+`parsebib-TeX-cleanup-target' for details."
   (let* ((value (ebib-db-get-field-value field key db 'noerror))
          (type (ebib-db-get-field-value "=type=" key db 'noerror))
-         (xref-key)
+         (xref-key-alist)
          (alias))
     (when (and (not value) xref)      ; Check if there's a cross-reference.
-      (setq xref-key (ebib-unbrace (ebib-db-get-field-value "crossref" key db 'noerror)))
-      (when xref-key
-        (let ((xref-db (ebib--find-db-for-key xref-key db)))
-          (when xref-db
-            (let* ((source-type (ebib-db-get-field-value "=type=" xref-key xref-db 'noerror))
-                   (xref-field (ebib--get-xref-field field type source-type (ebib-db-get-dialect db))))
-              (when xref-field
-                (setq value (ebib-db-get-field-value xref-field xref-key xref-db 'noerror))))))))
+      (setq xref-key-alist (cl-remove-if
+			    ;; Don't consider entries in the `xref'
+			    ;; field -- they don't inherit data.
+			    (lambda (x) (cl-equalp (car x) "xref"))
+			    (ebib--get-xref-alist key db)))
+      (when xref-key-alist
+	;; Try inheriting from each key in `xref-key-alist' in turn,
+	;; until `value' is non-nil
+	(cl-loop for (xref-type . xref-key) in xref-key-alist until value
+		 do
+		 (when-let* ((xref-db (ebib--find-db-for-key xref-key db))
+			     (source-type (ebib-db-get-field-value "=type=" xref-key xref-db 'noerror))
+			     (xref-field (ebib--get-xref-field field type source-type (ebib-db-get-dialect db)))
+			     ;; When the cross-reference is from an xdata field, check if entry
+			     ;; referred to is an @Xdata entry. Otherwise anything is fine.
+			     ((if (cl-equalp xref-type "xdata")
+				  (cl-equalp source-type "xdata")
+			        t))
+			     (xref-value (ebib-get-field-value xref-field xref-key xref-db 'noerror nil 'xref)))
+		   (setq value (propertize xref-value 'ebib--xref xref-key))))))
     (when (and (not value)
                (eq (ebib--get-dialect db) 'biblatex))                   ; Check if there is a field alias
       (setq alias (cdr (assoc-string field ebib--field-aliases 'case-fold)))
@@ -1751,12 +2232,25 @@ string has the text property `ebib--alias' with value t."
       (error "[Ebib] Field `%s' does not exist in entry `%s'" field key))
     (unless (= 0 (length value)) ; (length value) == 0 if value is nil or if value is "".
       (setq value (copy-sequence value)) ; Copy the value so we can add text properties.
+      (when (and (ebib-unbraced-p value)
+		 expand-strings
+		 ;; Fields consisting of only numerical values can be
+		 ;; written without bracing or quotes, and not be
+		 ;; expanded. Only continue if the value is not so.
+		 (not (string-match "\\`[[:digit:]:/-]+\\'" value))
+		 (or (eq ebib-expand-strings t)
+		     (assoc-string field ebib-expand-strings 'case-fold)
+		     (assoc-string alias ebib-expand-strings 'case-fold)))
+	(setq value (ebib--expand-string value ebib--cur-db 'noerror)))
+      (when (and value xref)
+	(setq value (ebib--replace-granular-xdata-references value db)))
       (when unbraced
         (setq value (ebib-unbrace value)))
+      (when (memq replace-TeX '(display org markdown))
+        (let ((parsebib-TeX-cleanup-target replace-TeX))
+          (setq value (parsebib-clean-TeX-markup value))))
       (when alias
-        (add-text-properties 0 (length value) '(ebib--alias t) value))
-      (when xref
-        (add-text-properties 0 (length value) `(ebib--xref ,xref-key) value)))
+        (add-text-properties 0 (length value) '(ebib--alias t) value)))
     (when (and (not value)
                (stringp noerror))
       (setq value noerror))
@@ -1786,10 +2280,13 @@ formatting the entry.  If SPECIFIC-FIELDS is non-nil, only such fields are used.
                     ;; back.  See github issues #42, #55, #62.
                     (reverse entry)))
       (insert (format "@%s{%s,\n" type key))
-      (insert (mapconcat (lambda (field)
-                           (format "\t%s = %s" (car field) (cdr field)))
-                         entry
-                         ",\n"))
+      (let ((indent (if ebib-save-indent-as-bibtex
+                        (make-string (+ bibtex-entry-offset bibtex-field-indentation) ?\s)
+                      "\t")))
+        (insert (mapconcat (lambda (field)
+                             (format "%s%s = %s" indent (car field) (cdr field)))
+                           entry
+                           ",\n")))
       (insert "\n}\n\n"))))
 
 (defun ebib--format-comments (db)
@@ -1873,25 +2370,115 @@ inherit a value, this function returns nil."
 ;; `ebib-db.el' cannot depend on `ebib-utils.el' (because `ebib-utils.el' already depends on
 ;; `ebib-db.el').  Similar considerations apply to `ebib-get-string' below.
 
-(defun ebib-set-string (abbr value db &optional overwrite)
+(defun ebib-set-string (abbr value db &optional overwrite nobrace)
   "Set the @string definition ABBR to VALUE in database DB.
 If ABBR does not exist, create it.  OVERWRITE functions as in
 `ebib-db-set-string'.  VALUE is enclosed in braces if it isn't
 already.
 
+If NOBRACE is t, the value is stored without braces.  If it is
+nil, braces are added if not already present.  NOBRACE may also be
+the symbol `as-is', in which case the value is stored as is.
+
 This function basically just calls `ebib-db-set-string' to do the
   real work."
-  (ebib-db-set-string abbr (if (ebib-unbraced-p value)
-                               (ebib-brace value)
-                             value)
+  (ebib-db-set-string abbr (cl-case nobrace
+			     (as-is value)
+			     ((nil) (ebib-brace value))
+			     (t (ebib-unbrace value)))
                       db overwrite))
 
-(defun ebib-get-string (abbr db &optional noerror unbraced)
+(defun ebib--expand-string (string db &optional noerror)
+  "Recursively expand STRING using abbreviations in DB.
+
+This function respects concatenation with `#', and quoting with
+{} and \".  If STRING contains unbalanced (and unescaped) braces
+or quote characters, an error is thrown, unless NOERROR is
+non-nil, in which case all errors are suppressed and the return
+value is simply STRING.
+
+If passed an entirely braced or quoted string (i.e. a string for
+which `ebib-unbraced-p' is nil), the return value is the string
+without the outermost set of braces/quotes.
+
+If any expansion occurs (i.e. an abbrev string is expanded to its
+definition, or any concatenation around `#' characters is done),
+the returned string has the face `ebib-abbrev-face'."
+  (condition-case err
+      (cl-loop with quoted = nil and curr-section = "" and expanded = nil
+	       ;; To be able detect its end, make sure that the string
+	       ;; ends in '#'. Even if it already does, null strings are
+	       ;; removed from the result, so this fact won't change the
+	       ;; output.
+	       for char across (concat string "#")
+	       ;; When we encounter an unquoted concat char...
+	       if (and (not quoted) (eq char ?#))
+	       ;; ...if the current string is non-empty (this deals with
+	       ;; repeated '#' characters)...
+	       unless (string-empty-p (string-trim curr-section))
+	       ;; ...then add it to the list of strings.
+	       collect (let ((curr-string (string-trim curr-section)))
+		         (if (ebib-unbraced-p curr-string)
+			     ;; Recur if string not quoted
+			     (progn (setq expanded t)
+				    (ebib-get-string curr-string db nil nil t))
+		           (unless (null list) (setq expanded t))
+		           (ebib-unbrace curr-string)))
+	       into list ;; collect unquoted/expanded strings into var `list'
+	       else      ;; String contains only whitespace, or is empty
+	       do (error "[Ebib] Too many `#' characters")
+	       end ;; end the 'unless'
+	       and
+	       ;; Either way, then reinitialise the string var as empty.
+	       do (setq curr-section "")
+	       else
+	       ;; Control delimiter/quoting characters
+	       ;; The `quoted' variable is a running list of opening quote
+	       ;; characters. Each new opening character is added to the
+	       ;; end. On encountering a closing character, if the last
+	       ;; item in the list balances it, remove the last item. This
+	       ;; way, `quoted' is nil whenever we are outside all quotes.
+	       do (unless (equal (last (string-to-list curr-section)) '(?\\))
+		    (cl-case char
+		      (?\" (if (eq (car (last quoted)) ?\")
+			       (setq quoted (butlast quoted))
+			     (setq quoted (append quoted '(?\")))))
+		      (?} (if (eq (car (last quoted)) ?{)
+			      (setq quoted (butlast quoted))
+			    (unless (member ?\" quoted) ;; account for e.g. " { "
+			      (error "[Ebib] Bad quoting, last char of: `%s%s%c'"
+				     (apply 'concat list)
+				     curr-section
+				     char))))
+		      (?{ (unless (member ?\" quoted) ;; account for e.g. " { "
+			    (setq quoted (append quoted '(?{)))))))
+	       and
+	       ;; If not at a '#' or a delimiter char, add current char to
+	       ;; the string
+	       do (setq curr-section (concat curr-section (char-to-string char)))
+	       end
+	       ;; If a proper expansion has been performed, propertize the result accordingly
+	       finally return (if (null quoted)
+			          (let ((expansion (apply 'concat list)))
+				    (if expanded
+				        (propertize expansion 'face 'ebib-abbrev-face)
+				      expansion))
+			        (error "[Ebib] Bad quoting, unbalanced `\"' characters")))
+    (t (if noerror
+           string
+         (signal (car err) (cdr err))))))
+
+(defun ebib-get-string (abbr db &optional noerror unbraced expand)
   "Return the value of @String definition ABBR in database DB.
 NOERROR functions as in `ebib-db-get-string', which this
 functions calls to get the actual value.  The braces around the
-value are removed if UNBRACED is non-nil."
-  (let ((value (ebib-db-get-string abbr db noerror)))
+value are removed if UNBRACED is non-nil.
+
+If EXPAND is non-nil, unbraced elements of a string's
+definition (i.e. other, already-defined string abbreviations)
+will be expanded recursively."
+  (let* ((def (ebib-db-get-string abbr db noerror))
+	 (value (if expand (ebib--expand-string def db noerror) def)))
     (if unbraced
         (ebib-unbrace value)
       value)))
@@ -1933,27 +2520,28 @@ value are removed if UNBRACED is non-nil."
 
 (defun ebib-unbraced-p (string)
   "Non-nil if STRING is not enclosed in braces or quotes."
-  (cl-flet ((remove-from-string (string remove)
-                                (apply #'concat (split-string string remove))))
-    (when (stringp string)
-      (cond
-       ((eq (string-to-char string) ?\{)
-        ;; First, remove all escaped { and } from the string:
-        (setq string (remove-from-string (remove-from-string string "[\\][{]")
-                                         "[\\][}]"))
-        ;; Then remove the innermost braces with their contents and continue until
-        ;; no more braces are left.
-        (while (and (member ?\{ (string-to-list string)) (member ?\} (string-to-list string)))
-          (setq string (remove-from-string string "{[^{]*?}")))
-        ;; If STRING is not empty, the original string contains material not in braces.
-        (> (length string) 0))
-       ((eq (string-to-char string) ?\")
-        ;; Remove escaped ", then remove any occurrences of balanced quotes with
-        ;; their contents and check for the length of the remaining string.
-        (> (length (remove-from-string (remove-from-string string "[\\][\"]")
-                                       "\"[^\"]*?\""))
-           0))
-       (t t)))))
+  (save-match-data
+    (cl-flet ((remove-from-string (string remove)
+                (apply #'concat (split-string string remove))))
+      (when (stringp string)
+        (cond
+         ((eq (string-to-char string) ?\{)
+          ;; First, remove all escaped { and } from the string:
+          (setq string (remove-from-string (remove-from-string string "[\\][{]")
+                                           "[\\][}]"))
+          ;; Then remove the innermost braces with their contents and continue until
+          ;; no more braces are left.
+          (while (and (member ?\{ (string-to-list string)) (member ?\} (string-to-list string)))
+            (setq string (remove-from-string string "{[^{]*?}")))
+          ;; If STRING is not empty, the original string contains material not in braces.
+          (> (length string) 0))
+         ((eq (string-to-char string) ?\")
+          ;; Remove escaped ", then remove any occurrences of balanced quotes with
+          ;; their contents and check for the length of the remaining string.
+          (> (length (remove-from-string (remove-from-string string "[\\][\"]")
+                                         "\"[^\"]*?\""))
+             0))
+         (t t))))))
 
 (defun ebib-unbrace (string)
   "Convert STRING to its unbraced counterpart.
@@ -1982,7 +2570,7 @@ Return nil if DB is either a filtered or a dependent database."
                 (eq (ebib-db-get-main db) database))
               ebib--databases))
 
-(defun ebib--list-fields (entry-type type dialect)
+(defun ebib--list-fields (entry-type type &optional dialect)
   "List the fields of ENTRY-TYPE.
 TYPE specifies which fields to list.  It is a symbol and can be
 one of the following: `required' means to list only required
@@ -2006,7 +2594,8 @@ which ENTRY-TYPE is an alias."
                                            (nth 3 (assoc-string entry-type (bibtex-entry-alist dialect) 'case-fold))))))
     (when (memq type '(optional extra all))
       (setq optional (mapcar #'car (nth 4 (assoc-string entry-type (bibtex-entry-alist dialect) 'case-fold)))))
-    (when (memq type '(all extra))
+    (when (and (memq type '(all extra))
+	       (not (member-ignore-case entry-type '("xdata" "set"))))
       (setq extra (seq-remove (lambda (elt)
                                 (member-ignore-case elt (append required optional)))
                               (cdr (assq dialect ebib-extra-fields)))))
@@ -2128,24 +2717,7 @@ year can be extracted from DATE, return nil."
 
 (defun ebib-clean-TeX-markup-from-entry (field key db)
   "Return the contents of FIELD from KEY in DB without TeX markup."
-  (ebib-clean-TeX-markup (ebib-get-field-value field key db "" 'unbraced 'xref)))
-
-(defun ebib-clean-TeX-markup (string)
-  "Return STRING without TeX markup."
-  (save-match-data
-    (let ((case-fold-search t))
-      ;; First replace TeX commands with their arguments and do some
-      ;; transformations, i.e., \textsc{cls} ==> CLS.  Note that optional
-      ;; arguments are also removed.
-      (while (string-match "\\\\\\([a-zA-Z*]*\\)\\(?:\\[.*?\\]\\)*{\\(.*?\\)}" string)
-        (let ((arg (copy-sequence (match-string 2 string))))
-          (pcase (match-string 1 string)
-            ((or "emph" "textit") (setq arg (propertize arg 'face '(italic))))
-            ("textbf" (setq arg (propertize arg 'face '(bold))))
-            ("textsc" (setq arg (upcase arg))))
-          (setq string (replace-match arg t t string)))))
-    ;; Now replace all remaining braces. This also takes care of nested braces.
-    (replace-regexp-in-string "[{}]" "" string)))
+  (parsebib-clean-TeX-markup (ebib-get-field-value field key db "" 'unbraced 'xref)))
 
 (defun ebib-abbreviate-journal-title (field key db)
   "Abbreviate the content of FIELD from KEY in database DB.
@@ -2165,15 +2737,24 @@ are returned as a string."
 (defun ebib-display-www-link (field key db)
   "Return the content of FIELD from KEY in DB as a link.
 This function is mainly intended for the DOI and URL fields."
-  (let ((str (ebib-get-field-value field key db 'noerror 'unbraced 'xref)))
-    (if (and str (string-match-p "^[0-9]" str))
-        (setq str (concat "https://dx.doi.org/" str)))
-    (if str
-        (propertize "www"
-                    'face '(:height 0.8 :inherit ebib-link-face)
-                    'mouse-face 'highlight
-                    'help-echo str)
-      (propertize "   " 'face '(:height 0.8)))))
+  (if-let* ((val (ebib-get-field-value field key db 'noerror 'unbraced 'xref))
+	    ;; Unless field is doi, assume the string is a full url
+	    (str (if (and (string= (downcase field) "doi")
+		          (string-match-p "^[0-9]" val))
+		     (concat "https://dx.doi.org/" val)
+		   val)))
+      (propertize "www"
+		  'face 'ebib-link-face
+		  'font-lock-face 'ebib-link-face
+		  'mouse-face 'highlight
+		  'help-echo str
+		  'button t
+		  'follow-link t
+		  'category t
+		  'button-data str
+		  'keymap button-map
+		  'action 'ebib--call-browser)
+    (propertize "   " 'face '(:height 0.8))))
 
 (defun ebib--sort-keys-list (keys db)
   "Sort KEYS according to the sort info of DB.
@@ -2182,13 +2763,14 @@ sorted on the sort info of DB.  Thus if two entries have the same
 value for the sort field, their keys determine the order in which
 they appear.
 
-Sorting on the sort field is done with `string-collate-lessp', so
-that the order in which the entries appear depends on the user's
-locale.  This is only relevant if one uses BibLaTeX and UTF-8
-characters in fields."
+Sorting on the sort field is done with the sort function
+specified in `ebib-field-sort-functions-alist', with
+`string-collate-lessp' as a fall-back."
   ;; First sort the keys themselves.
   (setq keys (sort keys #'string<))
-  ;; And then stably sort on the sort field.
+  ;; And then stably sort on the sort field.  Note that we do not check here if
+  ;; the field can be sorted on according to `ebib-index-columns'. This is a
+  ;; generic sort function.
   (let* ((sortinfo (or (ebib-db-get-sortinfo db)
                        ebib-index-default-sort
                        (cons (caar ebib-index-columns) 'ascend)))
@@ -2198,16 +2780,55 @@ characters in fields."
          ;; `cl-stable-sort' can simply be `car' rather than (a much
          ;; heavier) `ebib-get-field-value'. Sorting is much faster
          ;; that way.
-         (list (mapcar (lambda (key)
-                         (cons (ebib--get-field-value-for-display field key db) key))
-                       keys)))
-    (setq list (cl-stable-sort list #'string-collate-lessp :key #'car))
-    (setq keys (mapcar #'cdr list))
+         (sort-list (mapcar (lambda (key)
+                              (cons (ebib--get-field-value-for-display field key db) key))
+                            keys))
+	 (predicate (alist-get field ebib-field-sort-functions-alist
+			       #'string-collate-lessp
+                               nil
+			       #'cl-equalp)))
+    (setq sort-list (cl-stable-sort sort-list predicate :key #'car))
+    (setq keys (mapcar #'cdr sort-list))
     ;; Reverse the list if necessary.
     (if (eq direction 'descend)
         (setq keys (nreverse keys))))
   ;; Now return the list of keys.
   keys)
+
+;;; History commands
+
+(defun ebib--history-mutate (key)
+  "Alter `ebib--entry-history' list.
+Copy everything from the second element to the element at
+`ebib--history-get-head' in the `:history' list in
+`ebib--entry-history', reverse the result, and prepend it to the
+history list.  Then prepend KEY to the history list as well.
+Finally, set `:head' in `ebib--entry-history' to 0."
+  (when-let* ((head (ebib--history-get-head))
+	      ;; Only bother if head is sufficiently large, otherwise
+	      ;; there's nothing to prepend:
+	      ((< 1 head))
+	      (hist-list (plist-get ebib--entry-history :history))
+	      (interim (seq-subseq hist-list 0 head)))
+    (plist-put ebib--entry-history :history
+	       (append (reverse interim) hist-list)))
+  (push key (plist-get ebib--entry-history :history))
+  (ebib--history-set-head 0))
+
+(defun ebib--history-get (n)
+  "Get Nth elt of `:history' list in `ebib--entry-history'.
+N counts from 0. If N < 0, or there are not enough elements,
+return nil.."
+  (when (>= n 0)
+    (nth n (plist-get ebib--entry-history :history))))
+
+(defun ebib--history-set-head (n)
+  "Set `:head' in `ebib--entry-history' to N."
+  (plist-put ebib--entry-history :head n))
+
+(defun ebib--history-get-head ()
+  "Get value of `:head' in `ebib--entry-history'."
+  (plist-get ebib--entry-history :head))
 
 (provide 'ebib-utils)
 
