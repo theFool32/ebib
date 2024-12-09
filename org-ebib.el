@@ -112,7 +112,7 @@ link to an Ebib entry."
                    ((and (boundp 'ivy-mode) ivy-mode) (ebib-read-entry-ivy databases))
                    ((and (boundp 'helm-mode) helm-mode) (ebib-read-entry-helm databases))
                    (ebib-citation-insert-multiple (ebib-read-entry-multiple databases))
-                   (t (ebib-read-entry-single databases))))
+                   (t (ebib-read-entry-single "Select: " databases))))
          (separator (if (> (length entries) 1)
                         (read-string "Separator: ")
                       "")))
